@@ -61,3 +61,19 @@ def test_update_ratings_upset():
     from models.elo import update_ratings
     ra_low, rb_high = update_ratings(1400.0, 1600.0, winner=1, ka=40.0, kb=32.0)
     assert ra_low > 1400.0 + 20
+
+
+def test_decay_weight_boundary_exactly_730_days():
+    from models.elo import decay_weight
+    # Exactly 730 days = NOT > DECAY_THRESHOLD_DAYS, should return 1.0
+    exactly_730 = datetime.utcnow() - timedelta(days=730)
+    assert decay_weight(exactly_730) == 1.0
+
+
+def test_decay_weight_with_explicit_now():
+    from models.elo import decay_weight
+    fixed_now = datetime(2024, 1, 1)
+    old = datetime(2021, 1, 1)  # 3 years before fixed_now
+    assert decay_weight(old, now=fixed_now) == 0.5
+    recent = datetime(2023, 12, 1)  # 31 days before fixed_now
+    assert decay_weight(recent, now=fixed_now) == 1.0

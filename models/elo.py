@@ -15,13 +15,15 @@ def get_k_factor(ranking: Optional[int]) -> float:
     return 40.0
 
 
-def decay_weight(match_date: datetime) -> float:
-    days_ago = (datetime.utcnow() - match_date).days
+def decay_weight(match_date: datetime, now: Optional[datetime] = None) -> float:
+    if now is None:
+        now = datetime.utcnow()
+    days_ago = (now - match_date).days
     return 0.5 if days_ago > DECAY_THRESHOLD_DAYS else 1.0
 
 
 def update_ratings(
-    ra: float, rb: float, winner: int, ka: float = 32.0, kb: float = 32.0
+    ra: float, rb: float, winner: int, ka: float = 40.0, kb: float = 40.0
 ) -> tuple:
     ea = expected_score(ra, rb)
     sa = 1.0 if winner == 1 else 0.0
@@ -31,9 +33,17 @@ def update_ratings(
 
 
 def backfill_elo(db) -> None:
-    """Compute and store Elo ratings for all historical matches ordered by date."""
+    """Compute and store Elo ratings for all historical matches ordered by date.
+
+    Note: K-factor uses each player's CURRENT ranking, not their ranking at match time.
+    Historical ranking data is not available in the dataset. This is a known limitation
+    that introduces slight bias in ratings for players whose ranking has changed significantly.
+    """
+    from datetime import timezone
     from data.db import EloRating, Match, Player
 
+    # Pre-load all players to avoid N+1 queries
+    players = {p.id: p for p in db.query(Player).all()}
     ratings: dict = {}
 
     matches = (
@@ -53,8 +63,8 @@ def backfill_elo(db) -> None:
         match_dt = datetime.combine(match.date, datetime.min.time())
         weight = decay_weight(match_dt)
 
-        p1 = db.query(Player).filter_by(id=match.player1_id).first()
-        p2 = db.query(Player).filter_by(id=match.player2_id).first()
+        p1 = players.get(match.player1_id)
+        p2 = players.get(match.player2_id)
         ka = get_k_factor(p1.current_ranking if p1 else None) * weight
         kb = get_k_factor(p2.current_ranking if p2 else None) * weight
 
@@ -63,7 +73,7 @@ def backfill_elo(db) -> None:
         ratings[p1_key] = new_ra
         ratings[p2_key] = new_rb
 
-    # Persist ratings using merge to handle the unique constraint
+    now = datetime.now(timezone.utc)
     for (player_id, surface), rating in ratings.items():
         record = (
             db.query(EloRating)
@@ -72,7 +82,7 @@ def backfill_elo(db) -> None:
         )
         if record:
             record.rating = rating
-            record.updated_at = datetime.utcnow()
+            record.updated_at = now
         else:
             db.add(EloRating(player_id=player_id, surface=surface, rating=rating))
 
