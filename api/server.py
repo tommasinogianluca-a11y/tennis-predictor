@@ -1,3 +1,4 @@
+import hmac
 import time
 from typing import Optional
 
@@ -15,7 +16,7 @@ START_TIME = time.time()
 
 
 async def verify_api_key(x_api_key: str = Header(...)):
-    if x_api_key != API_SECRET_KEY:
+    if not API_SECRET_KEY or not hmac.compare_digest(x_api_key, API_SECRET_KEY):
         raise HTTPException(status_code=401, detail="Invalid API key.")
 
 
@@ -48,6 +49,8 @@ def matches_upcoming(
     _: None = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ):
+    # Returns 50 most recent predictions (not filtered to future dates).
+    # Use /report/today for same-day predictions.
     predictions = (
         db.query(Prediction)
         .order_by(Prediction.created_at.desc())

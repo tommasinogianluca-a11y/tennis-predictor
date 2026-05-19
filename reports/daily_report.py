@@ -73,8 +73,9 @@ def generate_markdown(db: Session) -> str:
     if report["value_bets"]:
         lines += ["", "## Value Bets", ""]
         for e in report["value_bets"]:
+            edge_str = f"{e['edge_pct']:.1f}%" if e["edge_pct"] is not None else "—"
             lines.append(
-                f"- **{e['value_bet']}** — edge {e['edge_pct']:.1f}%, "
+                f"- **{e['value_bet']}** — edge {edge_str}, "
                 f"model prob {e['p1_win_prob']:.1%}"
             )
     return "\n".join(lines)

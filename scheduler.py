@@ -64,7 +64,9 @@ def _weekly_retrain():
     from models.predictor import train_model
     db = SessionLocal()
     try:
-        pred_module._cached_model = train_model(db)
+        new_model = train_model(db)
+        with pred_module._model_lock:
+            pred_module._cached_model = new_model
         logger.info("Weekly retrain complete.")
     finally:
         db.close()
