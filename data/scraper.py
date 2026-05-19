@@ -30,7 +30,8 @@ def _robots_allowed(url: str) -> bool:
 
 
 def _cached_get(url: str, db: Session) -> Optional[str]:
-    cutoff = datetime.utcnow() - timedelta(hours=CACHE_TTL_HOURS)
+    from datetime import timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=CACHE_TTL_HOURS)
     record = db.query(RawCache).filter(
         RawCache.url == url, RawCache.cached_at >= cutoff
     ).first()
@@ -38,10 +39,11 @@ def _cached_get(url: str, db: Session) -> Optional[str]:
 
 
 def _cache_set(url: str, body: str, db: Session) -> None:
+    from datetime import timezone
     existing = db.query(RawCache).filter_by(url=url).first()
     if existing:
         existing.response_body = body
-        existing.cached_at = datetime.utcnow()
+        existing.cached_at = datetime.now(timezone.utc)
     else:
         db.add(RawCache(url=url, response_body=body))
     db.commit()

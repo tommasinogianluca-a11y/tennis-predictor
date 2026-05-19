@@ -50,16 +50,25 @@ def fetch_news(db: Session) -> int:
                 continue
 
             player = _fuzzy_match_player(headline, db)
-            db.add(News(
-                player_id=player.id if player else None,
-                headline=headline,
-                content=content,
-                source_url=source_url,
-                published_at=published_at,
-            ))
-            inserted += 1
+            try:
+                db.add(News(
+                    player_id=player.id if player else None,
+                    headline=headline,
+                    content=content,
+                    source_url=source_url,
+                    published_at=published_at,
+                ))
+                db.flush()
+                inserted += 1
+            except Exception as e:
+                db.rollback()
+                logger.debug("Skipped duplicate/invalid news entry: %s", e)
 
-        db.commit()
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning("Failed to commit feed %s: %s", feed_url, e)
 
     logger.info("News fetcher inserted %d new articles.", inserted)
     return inserted

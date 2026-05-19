@@ -72,6 +72,13 @@ def analyze_player(player_id: int, db: Session) -> dict:
             }],
         )
         raw = message.content[0].text.strip()
+        # Strip markdown code fences that Claude may add
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
         result = json.loads(raw)
     except (json.JSONDecodeError, anthropic.APIError, IndexError, Exception) as e:
         logger.warning("Sentiment API error for player %d: %s", player_id, e)
@@ -93,6 +100,7 @@ def analyze_player(player_id: int, db: Session) -> dict:
             flags=json.dumps(result.get("flags", [])),
         ))
     db.commit()
+    result["sentiment_score"] = score  # ensure return value uses clamped score
     return result
 
 
