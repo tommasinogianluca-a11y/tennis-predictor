@@ -23,7 +23,7 @@ class Player(Base):
     name = Column(String(200), nullable=False, unique=True)
     nationality = Column(String(10))
     dob = Column(Date, nullable=True)
-    atp_id = Column(String(50), nullable=True)
+    atp_id = Column(String(50), nullable=True, unique=True)
     current_ranking = Column(Integer, nullable=True)
 
 
@@ -38,7 +38,7 @@ class Match(Base):
     player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
-    score_string = Column(String(100), nullable=True)
+    score_string = Column(String(200), nullable=True)
 
 
 class MatchStats(Base):

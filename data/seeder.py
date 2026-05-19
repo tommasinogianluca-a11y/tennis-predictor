@@ -55,6 +55,8 @@ def _upsert_player(db: Session, atp_id: str, name: str, nationality: str) -> Pla
         player = Player(name=name, nationality=nationality, atp_id=atp_id or None)
         db.add(player)
         db.flush()
+    elif atp_id and not player.atp_id:
+        player.atp_id = atp_id
     return player
 
 
@@ -68,10 +70,22 @@ def _insert_stats(db: Session, match_id: int, player_id: int, row: dict, prefix:
     aces = _safe_int(row.get(f"{prefix}_ace", ""))
     df = _safe_int(row.get(f"{prefix}_df", ""))
 
-    first_serve_pct = (first_in / svpt * 100) if svpt and first_in else None
-    first_won_pct = (first_won / first_in * 100) if first_in and first_won else None
-    second_denom = (svpt - first_in) if svpt and first_in else None
-    second_won_pct = (second_won / second_denom * 100) if second_denom and second_won else None
+    first_serve_pct = (
+        (first_in / svpt * 100)
+        if (svpt is not None and svpt > 0 and first_in is not None)
+        else None
+    )
+    first_won_pct = (
+        (first_won / first_in * 100)
+        if (first_in is not None and first_in > 0 and first_won is not None)
+        else None
+    )
+    second_denom = (svpt - first_in) if (svpt is not None and first_in is not None) else None
+    second_won_pct = (
+        (second_won / second_denom * 100)
+        if (second_denom is not None and second_denom > 0 and second_won is not None)
+        else None
+    )
 
     stats = MatchStats(
         match_id=match_id, player_id=player_id,
@@ -95,38 +109,44 @@ def seed_year(db: Session, year: int) -> int:
 
     reader = csv.DictReader(io.StringIO(resp.text))
     count = 0
-    for row in reader:
-        winner = _upsert_player(
-            db, row.get("winner_id", ""), row.get("winner_name", ""),
-            row.get("winner_ioc", "")
-        )
-        loser = _upsert_player(
-            db, row.get("loser_id", ""), row.get("loser_name", ""),
-            row.get("loser_ioc", "")
-        )
-        match_date = _parse_date(row.get("tourney_date", ""))
-        surface = SURFACE_MAP.get(row.get("surface", ""), "hard")
-        category = LEVEL_MAP.get(row.get("tourney_level", ""), "250")
+    try:
+        for row in reader:
+            winner = _upsert_player(
+                db, row.get("winner_id", ""), row.get("winner_name", ""),
+                row.get("winner_ioc", "")
+            )
+            loser = _upsert_player(
+                db, row.get("loser_id", ""), row.get("loser_name", ""),
+                row.get("loser_ioc", "")
+            )
+            match_date = _parse_date(row.get("tourney_date", ""))
+            surface = SURFACE_MAP.get(row.get("surface", ""), "hard")
+            category = LEVEL_MAP.get(row.get("tourney_level", ""), "250")
 
-        match = Match(
-            tournament_name=row.get("tourney_name", ""),
-            tournament_category=category,
-            surface=surface,
-            round=row.get("round", ""),
-            date=match_date,
-            player1_id=winner.id,
-            player2_id=loser.id,
-            winner_id=winner.id,
-            score_string=row.get("score", ""),
-        )
-        db.add(match)
-        db.flush()
+            match = Match(
+                tournament_name=row.get("tourney_name", ""),
+                tournament_category=category,
+                surface=surface,
+                round=row.get("round", ""),
+                date=match_date,
+                player1_id=winner.id,
+                player2_id=loser.id,
+                winner_id=winner.id,
+                score_string=row.get("score", ""),
+            )
+            db.add(match)
+            db.flush()
 
-        _insert_stats(db, match.id, winner.id, row, "w")
-        _insert_stats(db, match.id, loser.id, row, "l")
-        count += 1
+            _insert_stats(db, match.id, winner.id, row, "w")
+            _insert_stats(db, match.id, loser.id, row, "l")
+            count += 1
 
-    db.commit()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("Rolled back year %d due to error: %s", year, e)
+        return 0
+
     return count
 
 
