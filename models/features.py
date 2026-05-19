@@ -172,6 +172,8 @@ def _get_fatigue_index(player_id: int, as_of: date, db: Session) -> int:
 
 
 def _get_sentiment(player_id: int, db: Session) -> float:
+    # SentimentCache stores one current snapshot per player (no history).
+    # No date filter needed — the cache is always the most recent analysis.
     from data.db import SentimentCache
     record = db.query(SentimentCache).filter_by(player_id=player_id).first()
     return record.sentiment_score if record else 0.0
