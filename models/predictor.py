@@ -1,6 +1,8 @@
 import base64
+import hashlib
 import logging
 import pickle
+import threading
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -18,11 +20,19 @@ TRAIN_CUTOFF = date(2023, 1, 1)
 
 
 def _serialize(model) -> str:
-    return base64.b64encode(pickle.dumps(model)).decode("utf-8")
+    raw = pickle.dumps(model)
+    digest = hashlib.sha256(raw).hexdigest()
+    payload = digest.encode() + b":" + raw
+    return base64.b64encode(payload).decode("utf-8")
 
 
 def _deserialize(data: str):
-    return pickle.loads(base64.b64decode(data.encode("utf-8")))
+    payload = base64.b64decode(data.encode("utf-8"))
+    digest_bytes, _, raw = payload.partition(b":")
+    expected = hashlib.sha256(raw).hexdigest().encode()
+    if digest_bytes != expected:
+        raise ValueError("Model data integrity check failed — possible corruption or tampering.")
+    return pickle.loads(raw)
 
 
 def save_model(model, db: Session) -> None:
@@ -78,7 +88,7 @@ def train_model(db: Session) -> object:
                 y_test.append(label)
         except Exception as exc:
             skipped += 1
-            continue
+            logger.debug("Skipped match %s: %s", getattr(match, 'id', '?'), exc)
 
     logger.info(
         "Dataset: %d train, %d test, %d skipped.",
@@ -115,15 +125,19 @@ def train_model(db: Session) -> object:
 
 
 _cached_model = None
+_model_lock = threading.Lock()
 
 
 def get_model(db: Session) -> object:
     global _cached_model
-    if _cached_model is None:
-        _cached_model = load_model(db)
-    if _cached_model is None:
-        logger.info("No model in DB — training now (first run).")
-        _cached_model = train_model(db)
+    if _cached_model is not None:
+        return _cached_model
+    with _model_lock:
+        if _cached_model is None:
+            _cached_model = load_model(db)
+        if _cached_model is None:
+            logger.info("No model in DB — training now (first run).")
+            _cached_model = train_model(db)
     return _cached_model
 
 
