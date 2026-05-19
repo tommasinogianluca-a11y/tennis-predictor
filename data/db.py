@@ -1,9 +1,9 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float,
-    DateTime, Text, ForeignKey, Date
+    DateTime, Text, ForeignKey, Date, UniqueConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Generator
 
 from config import DATABASE_URL
@@ -35,8 +35,8 @@ class Match(Base):
     surface = Column(String(20))              # hard/clay/grass/indoor
     round = Column(String(50))
     date = Column(Date)
-    player1_id = Column(Integer, ForeignKey("players.id"))
-    player2_id = Column(Integer, ForeignKey("players.id"))
+    player1_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player2_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     winner_id = Column(Integer, ForeignKey("players.id"), nullable=True)
     score_string = Column(String(100), nullable=True)
 
@@ -44,8 +44,8 @@ class Match(Base):
 class MatchStats(Base):
     __tablename__ = "match_stats"
     id = Column(Integer, primary_key=True)
-    match_id = Column(Integer, ForeignKey("matches.id"))
-    player_id = Column(Integer, ForeignKey("players.id"))
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     aces = Column(Integer, nullable=True)
     double_faults = Column(Integer, nullable=True)
     first_serve_pct = Column(Float, nullable=True)
@@ -71,11 +71,12 @@ class News(Base):
 
 class EloRating(Base):
     __tablename__ = "elo_ratings"
+    __table_args__ = (UniqueConstraint("player_id", "surface", name="uq_elo_player_surface"),)
     id = Column(Integer, primary_key=True)
-    player_id = Column(Integer, ForeignKey("players.id"))
-    surface = Column(String(20))  # hard/clay/grass/indoor
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    surface = Column(String(20), nullable=False)
     rating = Column(Float, default=1500.0)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Prediction(Base):
@@ -92,7 +93,7 @@ class Prediction(Base):
     edge_percentage = Column(Float, nullable=True)
     bookmaker_odds_p1 = Column(Float, nullable=True)
     bookmaker_odds_p2 = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ModelStore(Base):
@@ -100,7 +101,7 @@ class ModelStore(Base):
     id = Column(Integer, primary_key=True)
     model_name = Column(String(100), unique=True)
     model_data = Column(Text)       # base64-encoded pickle
-    trained_at = Column(DateTime, default=datetime.utcnow)
+    trained_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class RawCache(Base):
@@ -108,7 +109,7 @@ class RawCache(Base):
     id = Column(Integer, primary_key=True)
     url = Column(String(1000), unique=True)
     response_body = Column(Text)
-    cached_at = Column(DateTime, default=datetime.utcnow)
+    cached_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SentimentCache(Base):
@@ -118,7 +119,11 @@ class SentimentCache(Base):
     sentiment_score = Column(Float)
     reasoning = Column(Text, nullable=True)
     flags = Column(Text, nullable=True)   # JSON string
-    cached_at = Column(DateTime, default=datetime.utcnow)
+    cached_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+Index("ix_match_date", Match.__table__.c.date)
+Index("ix_matchstats_match_player", MatchStats.__table__.c.match_id, MatchStats.__table__.c.player_id)
 
 
 def get_db() -> Generator[Session, None, None]:
