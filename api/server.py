@@ -4,9 +4,11 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api.frontend import router as frontend_router
 from config import API_SECRET_KEY
 from data.db import EloRating, Player, Prediction, get_db
 from models.predictor import predict as _predict
@@ -21,6 +23,8 @@ async def verify_api_key(x_api_key: str = Header(...)):
 
 
 app = FastAPI(title="Tennis Predictor", version="1.0.0")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(frontend_router)
 
 
 @app.get("/")
