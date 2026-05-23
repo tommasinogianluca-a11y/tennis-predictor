@@ -2,7 +2,7 @@ import hmac
 import time
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -24,8 +24,17 @@ app = FastAPI(title="Tennis Predictor", version="1.0.0")
 
 
 @app.get("/")
-def health_check():
-    return {"status": "ok", "uptime": round(time.time() - START_TIME, 1)}
+def health_check(request: Request):
+    init_done, init_error, init_step = True, None, "done"
+    if hasattr(request.app.state, "get_init_status"):
+        init_done, init_error, init_step = request.app.state.get_init_status()
+    return {
+        "status": "ok",
+        "uptime": round(time.time() - START_TIME, 1),
+        "init_done": init_done,
+        "init_step": init_step,
+        "init_error": init_error if init_error else None,
+    }
 
 
 @app.get("/report/today")

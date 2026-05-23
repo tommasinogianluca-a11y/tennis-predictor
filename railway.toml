@@ -5,4 +5,4 @@ builder = "dockerfile"
 startCommand = "python main.py"
 restartPolicyType = "always"
 healthcheckPath = "/"
-healthcheckTimeout = 30
+healthcheckTimeout = 300

@@ -1,4 +1,7 @@
 import logging
+import sys
+import threading
+import traceback
 
 import uvicorn
 from rich.logging import RichHandler
@@ -12,6 +15,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_init_done = False
+_init_error = None
+_init_step = "not_started"
+
+
+def _log(msg):
+    """Print-based log that flushes immediately — works reliably in background threads."""
+    print(f"[INIT] {msg}", flush=True)
+
 
 def run_migrations():
     from alembic import command
@@ -19,15 +31,15 @@ def run_migrations():
     alembic_cfg = Config("alembic.ini")
     try:
         command.upgrade(alembic_cfg, "head")
-        logger.info("Alembic migrations applied.")
+        _log("Alembic migrations applied.")
     except Exception as e:
-        logger.warning("Alembic migration warning: %s (continuing)", e)
+        _log(f"Alembic migration warning: {e} (continuing)")
 
 
 def init_db():
     from data.db import create_tables
     create_tables()
-    logger.info("DB tables verified.")
+    _log("DB tables verified.")
 
 
 def seed_if_empty():
@@ -35,9 +47,12 @@ def seed_if_empty():
     from data.seeder import run_seed
     db = SessionLocal()
     try:
-        if db.query(Match).count() == 0:
-            logger.info("Empty DB — running Sackmann seed (may take a few minutes).")
+        count = db.query(Match).count()
+        if count == 0:
+            _log("Empty DB — running Sackmann seed (may take 10-20 min).")
             run_seed(db)
+        else:
+            _log(f"DB already has {count} matches, skipping seed.")
     finally:
         db.close()
 
@@ -48,9 +63,11 @@ def backfill_elo_if_empty():
     db = SessionLocal()
     try:
         if db.query(EloRating).count() == 0:
-            logger.info("No Elo ratings — running backfill.")
+            _log("No Elo ratings — running backfill.")
             backfill_elo(db)
-            logger.info("Elo backfill complete.")
+            _log("Elo backfill complete.")
+        else:
+            _log("ELO ratings already present, skipping.")
     finally:
         db.close()
 
@@ -65,19 +82,57 @@ def load_or_train_model():
         db.close()
 
 
-def main():
-    logger.info("Tennis Predictor starting up...")
-    run_migrations()
-    init_db()
-    seed_if_empty()
-    backfill_elo_if_empty()
-    load_or_train_model()
+def _background_init():
+    global _init_done, _init_error, _init_step
+    try:
+        _init_step = "migrations"
+        _log("Step 1/5: running migrations...")
+        run_migrations()
 
-    from scheduler import start_scheduler
-    start_scheduler()
+        _init_step = "create_tables"
+        _log("Step 2/5: creating tables...")
+        init_db()
+
+        _init_step = "seed"
+        _log("Step 3/5: seeding DB...")
+        seed_if_empty()
+
+        _init_step = "elo_backfill"
+        _log("Step 4/5: ELO backfill...")
+        backfill_elo_if_empty()
+
+        _init_step = "model"
+        _log("Step 5/5: loading/training model...")
+        load_or_train_model()
+
+        _init_step = "scheduler"
+        _log("Starting scheduler...")
+        from scheduler import start_scheduler
+        start_scheduler()
+
+        _init_done = True
+        _init_step = "done"
+        _log("Background init complete!")
+
+    except Exception as e:
+        _init_error = traceback.format_exc()
+        _init_step = f"FAILED at {_init_step}"
+        print(f"[INIT ERROR] Step={_init_step}\n{_init_error}", flush=True)
+
+
+def main():
+    _log("Tennis Predictor starting up...")
+
+    # Kick off heavy init in background — server responds to healthcheck immediately
+    t = threading.Thread(target=_background_init, daemon=True, name="bg-init")
+    t.start()
 
     from api.server import app
-    logger.info("Starting FastAPI on port %d", PORT)
+
+    # Expose init status on health endpoint via app state
+    app.state.get_init_status = lambda: (_init_done, _init_error, _init_step)
+
+    _log(f"Starting FastAPI on port {PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 
