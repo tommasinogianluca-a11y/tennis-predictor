@@ -37,3 +37,19 @@ def test_logout_clears_cookie():
     # Cookie cleared (empty value or max-age=0)
     cookie_header = resp.headers.get("set-cookie", "")
     assert "session_token" in cookie_header
+
+
+def _authed_client():
+    """Returns a TestClient with a valid session cookie."""
+    import hashlib
+    from config import API_SECRET_KEY, DASHBOARD_PASSWORD
+    token = hashlib.sha256(f"{DASHBOARD_PASSWORD}:{API_SECRET_KEY}".encode()).hexdigest()
+    c = TestClient(app, follow_redirects=False)
+    c.cookies.set("session_token", token)
+    return c
+
+
+def test_overview_stub_loads_when_authed():
+    c = _authed_client()
+    resp = c.get("/app/overview")
+    assert resp.status_code == 200
