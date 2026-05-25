@@ -18,6 +18,7 @@ def set_session_cookie(response, token: str) -> None:
         value=token,
         httponly=True,
         samesite="lax",
+        secure=True,
         max_age=60 * 60 * 24 * 30,  # 30 days
     )
 
