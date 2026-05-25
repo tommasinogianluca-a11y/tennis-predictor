@@ -1,0 +1,33 @@
+{% if not players and q | length >= 2 %}
+<p class="text-gray-500 text-sm">Nessun giocatore trovato per "{{ q }}".</p>
+{% elif not q or q | length < 2 %}
+<p class="text-gray-600 text-sm">Digita almeno 2 caratteri per cercare.</p>
+{% else %}
+{% for p in players %}
+<div class="bg-[#1a1a2e] rounded-lg p-4 mb-2 hover:bg-[#2d2d4e]/60 transition-colors">
+  <div class="flex justify-between items-start mb-2">
+    <div>
+      <span class="text-white font-medium text-sm">{{ p.name }}</span>
+      <span class="text-gray-500 text-xs ml-2">{{ p.nationality }}</span>
+    </div>
+    <div class="text-right">
+      {% if p.ranking %}
+      <span class="text-gray-400 text-xs">ATP #{{ p.ranking }}</span>
+      {% else %}
+      <span class="text-gray-600 text-xs">unranked</span>
+      {% endif %}
+      <div class="text-gray-600 text-[10px]">id: {{ p.id }}</div>
+    </div>
+  </div>
+  {% if p.elo %}
+  <div class="flex gap-3 flex-wrap">
+    {% for surface, rating in p.elo.items() %}
+    <span class="text-[10px] text-gray-500">
+      {{ surface }}: <span class="text-gray-300">{{ rating }}</span>
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}

@@ -209,3 +209,50 @@ def predict_submit(
         request, "partials/predict_result.html",
         {"result": result, "error": error},
     )
+
+
+# ── Players ──────────────────────────────────────────────────────────────────
+
+@router.get("/players", response_class=HTMLResponse)
+def players_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    ctx = {
+        "active": "players",
+        **_sidebar_context(db),
+    }
+    return templates.TemplateResponse(request, "players.html", ctx)
+
+
+@router.get("/players/search", response_class=HTMLResponse)
+def players_search(
+    request: Request,
+    q: str = "",
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    player_data = []
+    if q and len(q) >= 2:
+        players = (
+            db.query(Player)
+            .filter(Player.name.ilike(f"%{q}%"))
+            .order_by(Player.current_ranking.asc())
+            .limit(20)
+            .all()
+        )
+        for p in players:
+            ratings = db.query(EloRating).filter_by(player_id=p.id).all()
+            player_data.append({
+                "id": p.id,
+                "name": p.name,
+                "nationality": p.nationality or "—",
+                "ranking": p.current_ranking,
+                "elo": {r.surface: round(r.rating, 0) for r in ratings},
+            })
+
+    return templates.TemplateResponse(
+        request, "partials/player_results.html",
+        {"players": player_data, "q": q},
+    )

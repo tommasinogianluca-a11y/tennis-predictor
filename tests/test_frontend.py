@@ -71,3 +71,22 @@ def test_predict_page_loads():
     assert resp.status_code == 200
     assert b"Predict" in resp.content
     assert b"player1_id" in resp.content
+
+
+def test_players_page_loads():
+    c = _authed_client()
+    resp = c.get("/app/players")
+    assert resp.status_code == 200
+    assert b"Players" in resp.content
+
+
+def test_players_search_empty():
+    c = _authed_client()
+    resp = c.get("/app/players/search?q=")
+    assert resp.status_code == 200
+
+
+def test_players_search_with_query():
+    c = _authed_client()
+    resp = c.get("/app/players/search?q=sin")
+    assert resp.status_code == 200
