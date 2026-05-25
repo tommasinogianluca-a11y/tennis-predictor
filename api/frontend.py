@@ -18,6 +18,7 @@ from api.auth import (
 from data.db import (
     EloRating, Match, Player, Prediction, get_db,
 )
+from reports.daily_report import generate_report
 
 router = APIRouter(prefix="/app")
 templates = Jinja2Templates(directory="templates")
@@ -90,7 +91,6 @@ def overview(
     _: None = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    from reports.daily_report import generate_report
     report = generate_report(db)
 
     # System status from app state
