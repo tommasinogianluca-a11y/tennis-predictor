@@ -19,9 +19,17 @@ def generate_report(db: Session) -> dict:
         .all()
     )
 
+    player_ids = set()
+    for pred in predictions:
+        player_ids.add(pred.player1_id)
+        player_ids.add(pred.player2_id)
+    players = {
+        p.id: p.name
+        for p in db.query(Player).filter(Player.id.in_(player_ids)).all()
+    }
+
     def _name(pid: int) -> str:
-        p = db.query(Player).filter_by(id=pid).first()
-        return p.name if p else str(pid)
+        return players.get(pid, str(pid))
 
     entries = []
     for pred in predictions:
