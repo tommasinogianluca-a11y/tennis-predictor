@@ -82,8 +82,34 @@ def root_redirect():
     return RedirectResponse(url="/app/overview", status_code=303)
 
 
-# ── Protected stub routes ────────────────────────────────────────────────────
+# ── Overview ─────────────────────────────────────────────────────────────────
 
 @router.get("/overview", response_class=HTMLResponse)
-def overview(request: Request, _: None = Depends(require_auth)):
-    return HTMLResponse("<h1>Overview</h1>")
+def overview(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    from reports.daily_report import generate_report
+    report = generate_report(db)
+
+    # System status from app state
+    init_done, init_error, init_step = True, None, "done"
+    if hasattr(request.app.state, "get_init_status"):
+        init_done, init_error, init_step = request.app.state.get_init_status()
+
+    # Top value bet (highest edge)
+    top_bet = None
+    if report["value_bets"]:
+        top_bet = max(report["value_bets"], key=lambda x: x.get("edge_pct") or 0)
+
+    ctx = {
+        "active": "overview",
+        "report": report,
+        "top_bet": top_bet,
+        "init_done": init_done,
+        "init_step": init_step,
+        "init_error": init_error,
+        **_sidebar_context(db),
+    }
+    return templates.TemplateResponse(request, "overview.html", ctx)

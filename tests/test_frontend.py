@@ -49,7 +49,10 @@ def _authed_client():
     return c
 
 
-def test_overview_stub_loads_when_authed():
+def test_overview_page_loads():
     c = _authed_client()
     resp = c.get("/app/overview")
     assert resp.status_code == 200
+    assert b"Overview" in resp.content
+    assert b"Scommettitore" in resp.content
+    assert b"Value Bets" in resp.content
