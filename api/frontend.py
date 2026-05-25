@@ -167,13 +167,17 @@ def predict_submit(
     db: Session = Depends(get_db),
 ):
     from models.predictor import predict as _predict
+    _VALID_SURFACES = {"hard", "clay", "grass", "indoor"}
+    _VALID_CATEGORIES = {"Slam", "Masters", "500", "250", "Finals"}
     error = None
     result = None
 
     p1 = db.query(Player).filter_by(id=player1_id).first()
     p2 = db.query(Player).filter_by(id=player2_id).first()
 
-    if not p1 or not p2:
+    if surface not in _VALID_SURFACES or category not in _VALID_CATEGORIES:
+        error = "Superficie o categoria non valida."
+    elif not p1 or not p2:
         error = f"Giocatore non trovato: {'P1' if not p1 else 'P2'} (id={player1_id if not p1 else player2_id})"
     else:
         try:
