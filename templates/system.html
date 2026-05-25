@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}System — Scommettitore{% endblock %}
+
+{% block content %}
+<h1 class="text-white font-bold text-lg mb-5">⚙️ System</h1>
+
+<!-- Quick Actions -->
+<div class="bg-[#1a1a2e] rounded-lg p-4 mb-4">
+  <div class="text-gray-500 text-[10px] uppercase tracking-widest mb-3">Quick Actions</div>
+  <div id="action-area">
+    <div class="flex gap-2 flex-wrap">
+      {% for action_key, action_label in actions.items() %}
+      <button
+        hx-post="/app/system/run/{{ action_key }}"
+        hx-target="#action-area"
+        hx-swap="beforeend"
+        hx-indicator="#spin-{{ action_key }}"
+        class="bg-[#2d2d4e] hover:bg-purple-700 text-gray-300 hover:text-white text-xs px-3 py-2 rounded transition-colors flex items-center gap-1"
+      >
+        {{ action_label }}
+        <span id="spin-{{ action_key }}" class="htmx-indicator text-gray-400">⏳</span>
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- DB Stats (loaded via HTMX on page load) -->
+<div
+  hx-get="/app/system/stats"
+  hx-trigger="load"
+  hx-swap="innerHTML"
+  class="mb-4"
+>
+  <div class="bg-[#1a1a2e] rounded-lg p-3 text-center text-gray-600 text-sm">
+    Loading stats...
+  </div>
+</div>
+
+<style>
+  .htmx-indicator { display: none; }
+  .htmx-indicator.htmx-request { display: inline !important; }
+</style>
+{% endblock %}

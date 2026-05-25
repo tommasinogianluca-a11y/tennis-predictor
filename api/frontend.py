@@ -230,6 +230,169 @@ def players_page(
     return templates.TemplateResponse(request, "players.html", ctx)
 
 
+# ── System ───────────────────────────────────────────────────────────────────
+
+_ACTION_LABELS = {
+    "scrape": "🔄 Scrape",
+    "retrain": "🧠 Retrain",
+    "refresh_odds": "💹 Refresh Odds",
+    "fetch_news": "📰 Fetch News",
+}
+
+
+def _run_action(job_id: str, action: str) -> None:
+    """Run a system action in a background thread, appending log lines to _jobs[job_id]."""
+
+    def log(msg: str) -> None:
+        _jobs[job_id]["log"].append(msg)
+
+    try:
+        if action == "scrape":
+            from data.db import SessionLocal
+            from data.scraper import run_scraper
+            from models.elo import backfill_elo
+            log("[INFO] Starting scraper...")
+            db = SessionLocal()
+            try:
+                run_scraper(db)
+                log("[INFO] Scraper done. Running ELO update...")
+                backfill_elo(db)
+                log("[OK] ELO updated. ✅")
+            finally:
+                db.close()
+
+        elif action == "retrain":
+            import io
+            from contextlib import redirect_stdout
+            import models.predictor as pred_module
+            from data.db import SessionLocal
+            from models.predictor import train_model
+            log("[INFO] Starting model retrain (~5 min)...")
+            db = SessionLocal()
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    new_model = train_model(db)
+                for line in buf.getvalue().strip().splitlines():
+                    log(line)
+                with pred_module._model_lock:
+                    pred_module._cached_model = new_model
+                log("[OK] Retrain complete. ✅")
+            finally:
+                db.close()
+
+        elif action == "refresh_odds":
+            from data.db import SessionLocal
+            from data.odds import detect_value_bets
+            from models.predictor import predict as _predict
+            log("[INFO] Refreshing odds and detecting value bets...")
+            db = SessionLocal()
+            try:
+                bets = detect_value_bets(db, _predict)
+                log(f"[OK] {len(bets)} value bets found. ✅")
+            finally:
+                db.close()
+
+        elif action == "fetch_news":
+            from data.db import SessionLocal
+            from data.news_fetcher import fetch_news
+            from llm.sentiment import run_sentiment_update
+            log("[INFO] Fetching news...")
+            db = SessionLocal()
+            try:
+                fetch_news(db)
+                log("[INFO] Running sentiment analysis...")
+                run_sentiment_update(db)
+                log("[OK] News and sentiment updated. ✅")
+            finally:
+                db.close()
+
+        else:
+            log(f"[ERROR] Unknown action: {action}")
+            _jobs[job_id]["status"] = "failed"
+            return
+
+        _jobs[job_id]["status"] = "done"
+
+    except Exception as exc:
+        import traceback
+        log(f"[ERROR] {exc}")
+        log(traceback.format_exc())
+        _jobs[job_id]["status"] = "failed"
+
+
+@router.get("/system", response_class=HTMLResponse)
+def system_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    ctx = {
+        "active": "system",
+        "actions": _ACTION_LABELS,
+        **_sidebar_context(db),
+    }
+    return templates.TemplateResponse(request, "system.html", ctx)
+
+
+@router.post("/system/run/{action}", response_class=HTMLResponse)
+def system_run_action(
+    action: str,
+    request: Request,
+    _: None = Depends(require_auth),
+):
+    if action not in _ACTION_LABELS:
+        return HTMLResponse(
+            f'<div class="text-red-400 text-sm p-3">Unknown action: {action}</div>',
+            status_code=400,
+        )
+    job_id = _new_job()
+    t = threading.Thread(target=_run_action, args=(job_id, action), daemon=True)
+    t.start()
+    return templates.TemplateResponse(
+        request, "partials/job_status.html",
+        {"job": _jobs[job_id], "job_id": job_id},
+    )
+
+
+@router.get("/system/job/{job_id}", response_class=HTMLResponse)
+def system_job_status(
+    job_id: str,
+    request: Request,
+    _: None = Depends(require_auth),
+):
+    job = _jobs.get(job_id)
+    if not job:
+        return HTMLResponse('<div class="text-red-400 text-sm p-3">Job not found.</div>')
+    return templates.TemplateResponse(
+        request, "partials/job_status.html",
+        {"job": job, "job_id": job_id},
+    )
+
+
+@router.get("/system/stats", response_class=HTMLResponse)
+def system_stats(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    stats = {
+        "matches": db.query(Match).count(),
+        "players": db.query(Player).count(),
+        "predictions": db.query(Prediction).count(),
+        "jobs": 0,
+    }
+    try:
+        from scheduler import scheduler
+        stats["jobs"] = len(scheduler.get_jobs())
+    except Exception:
+        pass
+    return templates.TemplateResponse(
+        request, "partials/db_stats.html",
+        {"stats": stats},
+    )
+
+
 @router.get("/players/search", response_class=HTMLResponse)
 def players_search(
     request: Request,

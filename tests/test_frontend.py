@@ -90,3 +90,38 @@ def test_players_search_with_query():
     c = _authed_client()
     resp = c.get("/app/players/search?q=sin")
     assert resp.status_code == 200
+
+
+def test_system_page_loads():
+    c = _authed_client()
+    resp = c.get("/app/system")
+    assert resp.status_code == 200
+    assert b"System" in resp.content
+    assert b"Quick Actions" in resp.content
+
+
+def test_system_run_unknown_action_returns_400():
+    c = _authed_client()
+    resp = c.post("/app/system/run/invalid_action")
+    assert resp.status_code == 400
+
+
+def test_system_run_action_returns_job_fragment():
+    c = _authed_client()
+    resp = c.post("/app/system/run/refresh_odds")
+    assert resp.status_code == 200
+    assert b"job-" in resp.content
+
+
+def test_system_job_status_not_found():
+    c = _authed_client()
+    resp = c.get("/app/system/job/nonexistent")
+    assert resp.status_code == 200
+    assert b"not found" in resp.content.lower()
+
+
+def test_system_stats_fragment():
+    c = _authed_client()
+    resp = c.get("/app/system/stats")
+    assert resp.status_code == 200
+    assert b"matches" in resp.content
