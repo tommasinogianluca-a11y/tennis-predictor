@@ -4,9 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Scommettitore{% endblock %}</title>
+  {% block head %}{% endblock %}
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
-  <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
+          integrity="sha384-/mhDoLbDldZc3qpsXHjDTx3+5dzPJBjgmkgkHcxX9gBB5dGMrQCCqkviLpiqEKF"
+          crossorigin="anonymous"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"
+          integrity="sha384-3pZMEIcVVGNiEvLGSS4GrAFMqP4W2XWNiACnHuTJxFD5gRr9jHmMYpNiMuDLjJh"
+          crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body class="flex h-screen bg-[#0f0f1a] text-white overflow-hidden">
@@ -18,52 +23,60 @@
       🎾 <span>Scommettitore</span>
     </div>
 
-    <!-- TODAY -->
-    <div class="text-[9px] text-gray-600 uppercase tracking-widest mb-1.5">Today</div>
+    <nav aria-label="Main navigation" class="flex flex-col flex-1">
 
-    <a href="/app/overview"
-       class="px-2 py-1.5 rounded text-[11px] mb-0.5 flex items-center gap-1
-              {% if active == 'overview' %}bg-[#2d2d4e] text-white border-l-2 border-purple-600
-              {% else %}text-gray-500 hover:text-gray-300{% endif %}">
-      📊 Overview
-    </a>
+      <!-- TODAY -->
+      <div class="text-[9px] text-gray-600 uppercase tracking-widest mb-1.5">Today</div>
 
-    <a href="/app/value-bets"
-       class="px-2 py-1.5 rounded text-[11px] mb-0.5 flex justify-between items-center
-              {% if active == 'value_bets' %}bg-[#2d2d4e] text-white border-l-2 border-purple-600
-              {% else %}text-gray-500 hover:text-gray-300{% endif %}">
-      <span>💰 Value Bets</span>
-      {% if vb_count %}
-      <span class="bg-purple-600 text-white text-[8px] rounded-full px-1.5">{{ vb_count }}</span>
-      {% endif %}
-    </a>
+      <a href="/app/overview"
+         {% if active == 'overview' %}aria-current="page"{% endif %}
+         class="px-2 py-1.5 rounded text-[11px] mb-0.5 flex items-center gap-1
+                {% if active == 'overview' %}bg-[#2d2d4e] text-white border-l-2 border-l-purple-600
+                {% else %}text-gray-500 hover:text-gray-300{% endif %}">
+        📊 Overview
+      </a>
 
-    <!-- TOOLS -->
-    <div class="text-[9px] text-gray-600 uppercase tracking-widest mt-3 mb-1.5">Tools</div>
+      <a href="/app/value-bets"
+         {% if active == 'value_bets' %}aria-current="page"{% endif %}
+         class="px-2 py-1.5 rounded text-[11px] mb-0.5 flex justify-between items-center
+                {% if active == 'value_bets' %}bg-[#2d2d4e] text-white border-l-2 border-l-purple-600
+                {% else %}text-gray-500 hover:text-gray-300{% endif %}">
+        <span>💰 Value Bets</span>
+        {% if vb_count %}
+        <span class="bg-purple-600 text-white text-[8px] rounded-full px-1.5">{{ vb_count }}</span>
+        {% endif %}
+      </a>
 
-    <a href="/app/predict"
-       class="px-2 py-1.5 rounded text-[11px] mb-0.5
-              {% if active == 'predict' %}bg-[#2d2d4e] text-white border-l-2 border-purple-600
-              {% else %}text-gray-500 hover:text-gray-300{% endif %}">
-      🔮 Predict
-    </a>
+      <!-- TOOLS -->
+      <div class="text-[9px] text-gray-600 uppercase tracking-widest mt-3 mb-1.5">Tools</div>
 
-    <a href="/app/players"
-       class="px-2 py-1.5 rounded text-[11px] mb-0.5
-              {% if active == 'players' %}bg-[#2d2d4e] text-white border-l-2 border-purple-600
-              {% else %}text-gray-500 hover:text-gray-300{% endif %}">
-      👤 Players
-    </a>
+      <a href="/app/predict"
+         {% if active == 'predict' %}aria-current="page"{% endif %}
+         class="px-2 py-1.5 rounded text-[11px] mb-0.5
+                {% if active == 'predict' %}bg-[#2d2d4e] text-white border-l-2 border-l-purple-600
+                {% else %}text-gray-500 hover:text-gray-300{% endif %}">
+        🔮 Predict
+      </a>
 
-    <!-- SYSTEM (bottom) -->
-    <div class="flex-1"></div>
-    <a href="/app/system"
-       class="px-2 py-1.5 rounded text-[11px] border-t border-[#2a2a3e] pt-2.5
-              {% if active == 'system' %}bg-[#2d2d4e] text-white border-l-2 border-purple-600
-              {% else %}text-gray-500 hover:text-gray-300{% endif %}">
-      ⚙️ System
-    </a>
+      <a href="/app/players"
+         {% if active == 'players' %}aria-current="page"{% endif %}
+         class="px-2 py-1.5 rounded text-[11px] mb-0.5
+                {% if active == 'players' %}bg-[#2d2d4e] text-white border-l-2 border-l-purple-600
+                {% else %}text-gray-500 hover:text-gray-300{% endif %}">
+        👤 Players
+      </a>
 
+      <!-- SYSTEM (bottom) -->
+      <div class="flex-1"></div>
+      <a href="/app/system"
+         {% if active == 'system' %}aria-current="page"{% endif %}
+         class="px-2 py-1.5 rounded text-[11px] border-t border-[#2a2a3e] pt-2.5
+                {% if active == 'system' %}bg-[#2d2d4e] text-white border-l-2 border-l-purple-600
+                {% else %}text-gray-500 hover:text-gray-300{% endif %}">
+        ⚙️ System
+      </a>
+
+    </nav>
   </aside>
 
   <!-- Main content -->
