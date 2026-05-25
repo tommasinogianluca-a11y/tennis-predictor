@@ -1,0 +1,42 @@
+{% if error %}
+<div class="bg-red-900/30 border border-red-700 text-red-400 text-sm rounded-lg p-4">
+  ⚠️ {{ error }}
+</div>
+{% elif result %}
+<div class="bg-[#1a1a2e] rounded-lg p-4 border-l-4 border-purple-600">
+  <div class="text-gray-500 text-[10px] uppercase tracking-widest mb-3">Risultato</div>
+
+  <div class="text-white text-sm font-medium mb-3">
+    {{ result.p1_name }} vs {{ result.p2_name }}
+    <span class="text-gray-500 font-normal">· {{ result.surface }} · {{ result.category }}</span>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3 mb-3">
+    <div class="bg-[#0f0f1a] rounded p-3 text-center">
+      <div class="text-purple-400 text-xl font-bold">{{ result.p1_win_prob }}%</div>
+      <div class="text-gray-500 text-xs mt-0.5">p({{ result.p1_name.split()[0] }})</div>
+    </div>
+    <div class="bg-[#0f0f1a] rounded p-3 text-center">
+      <div class="text-blue-400 text-xl font-bold">{{ result.p2_win_prob }}%</div>
+      <div class="text-gray-500 text-xs mt-0.5">p({{ result.p2_name.split()[0] }})</div>
+    </div>
+  </div>
+
+  <div class="flex gap-4 text-xs">
+    {% if result.elo_delta is not none %}
+    <span class="text-gray-400">
+      ELO delta:
+      <span class="{% if result.elo_delta > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ "%+.0f"|format(result.elo_delta) }}
+      </span>
+    </span>
+    {% endif %}
+    {% if result.win_rate_p1 is not none %}
+    <span class="text-gray-400">
+      Win rate {{ result.surface }}:
+      <span class="text-amber-400">{{ result.win_rate_p1 }}%</span>
+    </span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

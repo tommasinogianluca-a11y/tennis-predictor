@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Predict — Scommettitore{% endblock %}
+
+{% block content %}
+<h1 class="text-white font-bold text-lg mb-5">🔮 Predict Match</h1>
+
+<div class="bg-[#1a1a2e] rounded-lg p-5 max-w-md">
+  <form
+    hx-post="/app/predict"
+    hx-target="#predict-result"
+    hx-swap="innerHTML"
+    hx-indicator="#predict-spinner"
+  >
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <div>
+        <label class="block text-gray-400 text-xs mb-1">Player 1 ID</label>
+        <input type="number" name="player1_id" required
+          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+      </div>
+      <div>
+        <label class="block text-gray-400 text-xs mb-1">Player 2 ID</label>
+        <input type="number" name="player2_id" required
+          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <label class="block text-gray-400 text-xs mb-1">Superficie</label>
+        <select name="surface"
+          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+          {% for s in surfaces %}
+          <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-gray-400 text-xs mb-1">Categoria</label>
+        <select name="category"
+          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+          {% for c in categories %}
+          <option value="{{ c }}">{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <button type="submit"
+      class="w-full bg-purple-600 hover:bg-purple-700 text-white rounded py-2 text-sm font-medium transition-colors">
+      Calcola Predizione
+    </button>
+
+    <div id="predict-spinner" class="htmx-indicator text-center mt-3 text-gray-500 text-sm">
+      ⏳ Calcolando...
+    </div>
+  </form>
+</div>
+
+<div id="predict-result" class="mt-4 max-w-md"></div>
+
+<style>
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator { display: block !important; }
+</style>
+{% endblock %}

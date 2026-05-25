@@ -63,3 +63,11 @@ def test_value_bets_page_loads():
     resp = c.get("/app/value-bets")
     assert resp.status_code == 200
     assert b"Value Bets" in resp.content
+
+
+def test_predict_page_loads():
+    c = _authed_client()
+    resp = c.get("/app/predict")
+    assert resp.status_code == 200
+    assert b"Predict" in resp.content
+    assert b"player1_id" in resp.content
