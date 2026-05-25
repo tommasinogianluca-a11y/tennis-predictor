@@ -113,3 +113,25 @@ def overview(
         **_sidebar_context(db),
     }
     return templates.TemplateResponse(request, "overview.html", ctx)
+
+
+# ── Value Bets ───────────────────────────────────────────────────────────────
+
+@router.get("/value-bets", response_class=HTMLResponse)
+def value_bets_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    report = generate_report(db)
+    bets = sorted(
+        report["value_bets"],
+        key=lambda x: x.get("edge_pct") or 0,
+        reverse=True,
+    )
+    ctx = {
+        "active": "value_bets",
+        "bets": bets,
+        **_sidebar_context(db),
+    }
+    return templates.TemplateResponse(request, "value_bets.html", ctx)

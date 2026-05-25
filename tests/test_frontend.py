@@ -56,3 +56,10 @@ def test_overview_page_loads():
     assert b"Overview" in resp.content
     assert b"Scommettitore" in resp.content
     assert b"Value Bets" in resp.content
+
+
+def test_value_bets_page_loads():
+    c = _authed_client()
+    resp = c.get("/app/value-bets")
+    assert resp.status_code == 200
+    assert b"Value Bets" in resp.content

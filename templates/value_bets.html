@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Value Bets — Scommettitore{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-5">
+  <h1 class="text-white font-bold text-lg">Value Bets</h1>
+  {% if bets %}
+  <span class="bg-purple-600 text-white text-xs rounded-full px-2 py-0.5">{{ bets | length }}</span>
+  {% endif %}
+</div>
+
+{% if bets %}
+<div class="bg-[#1a1a2e] rounded-lg overflow-hidden">
+  <!-- Header -->
+  <div class="grid grid-cols-[2fr_1fr_1fr_1fr] bg-[#2d2d4e] px-4 py-2">
+    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Match</span>
+    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Superficie</span>
+    <span class="text-gray-500 text-[10px] uppercase tracking-wider">p(win)</span>
+    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Edge</span>
+  </div>
+  <!-- Rows -->
+  {% for bet in bets %}
+  <div class="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-2.5 border-b border-[#2a2a3e] last:border-b-0 hover:bg-[#2d2d4e]/40 transition-colors">
+    <div>
+      <span class="text-white text-sm">{{ bet.player1 }} vs {{ bet.player2 }}</span>
+      {% if bet.value_bet %}
+      <span class="text-gray-500 text-xs ml-1">· {{ bet.value_bet }}</span>
+      {% endif %}
+    </div>
+    <span class="text-sm
+      {% if bet.surface == 'clay' %}text-amber-400
+      {% elif bet.surface == 'grass' %}text-emerald-400
+      {% elif bet.surface == 'hard' %}text-blue-400
+      {% else %}text-gray-400{% endif %}">
+      {{ bet.surface }}
+    </span>
+    <span class="text-gray-400 text-sm">{{ "%.0f"|format(bet.p1_win_prob * 100) }}%</span>
+    <span class="font-bold text-sm
+      {% if bet.edge_pct >= 10 %}text-emerald-400
+      {% elif bet.edge_pct >= 5 %}text-amber-400
+      {% else %}text-gray-400{% endif %}">
+      +{{ "%.1f"|format(bet.edge_pct) }}%
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bg-[#1a1a2e] rounded-lg p-8 text-center">
+  <div class="text-gray-500 text-sm">Nessuna value bet trovata oggi.</div>
+  <div class="text-gray-600 text-xs mt-1">Lo scheduler aggiorna le odds ogni 6 ore.</div>
+</div>
+{% endif %}
+{% endblock %}
