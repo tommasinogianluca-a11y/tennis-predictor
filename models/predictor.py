@@ -17,6 +17,7 @@ from models.features import build_feature_vector
 logger = logging.getLogger(__name__)
 MODEL_NAME = "tennis_xgb_v1"
 TRAIN_CUTOFF = date(2023, 1, 1)
+TRAIN_START = date(2019, 1, 1)  # cap dataset to last ~6 years to limit RAM usage
 
 
 def _serialize(model) -> str:
@@ -206,7 +207,7 @@ def train_model(db: Session) -> object:
     logger.info("Building training dataset (in-memory fast path)...")
     cache = _build_memory_cache(db)
     all_matches = [m for m in cache["all_matches"]
-                   if m.winner_id is not None]
+                   if m.winner_id is not None and m.date is not None and m.date >= TRAIN_START]
 
     # Shuffle so StratifiedKFold doesn't see monotone class sequences
     _random.seed(42)
@@ -261,9 +262,9 @@ def train_model(db: Session) -> object:
         n_estimators=200, max_depth=4, learning_rate=0.05,
         subsample=0.8, colsample_bytree=0.8,
         use_label_encoder=False, eval_metric="logloss",
-        n_jobs=-1,
+        n_jobs=1,  # serial to limit peak RAM on Railway
     )
-    model = CalibratedClassifierCV(base, method="sigmoid", cv=5)
+    model = CalibratedClassifierCV(base, method="sigmoid", cv=3)  # cv=3 saves ~40% RAM vs cv=5
     model.fit(X_tr, y_tr)
 
     if X_test:
