@@ -8,11 +8,11 @@
     <div class="text-gray-500 text-[10px]">players</div>
   </div>
   <div class="text-center">
-    <div class="text-amber-400 text-sm font-bold">{{ stats.predictions }}</div>
+    <div class="text-amber-400 text-sm font-bold">{{ "{:,}".format(stats.predictions) }}</div>
     <div class="text-gray-500 text-[10px]">predictions</div>
   </div>
   <div class="text-center">
-    <div class="text-blue-400 text-sm font-bold">{{ stats.jobs }}</div>
-    <div class="text-gray-500 text-[10px]">jobs ✅</div>
+    <div class="text-blue-400 text-sm font-bold">{{ "{:,}".format(stats.jobs) }}</div>
+    <div class="text-gray-500 text-[10px]">jobs</div>
   </div>
 </div>

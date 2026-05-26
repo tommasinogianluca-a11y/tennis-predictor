@@ -1,3 +1,4 @@
+import html as _html
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -343,7 +344,7 @@ def system_run_action(
 ):
     if action not in _ACTION_LABELS:
         return HTMLResponse(
-            f'<div class="text-red-400 text-sm p-3">Unknown action: {action}</div>',
+            f'<div class="text-red-400 text-sm p-3">Unknown action: {_html.escape(action)}</div>',
             status_code=400,
         )
     job_id = _new_job()
