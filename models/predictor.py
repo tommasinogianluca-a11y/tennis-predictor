@@ -17,7 +17,6 @@ from models.features import build_feature_vector
 logger = logging.getLogger(__name__)
 MODEL_NAME = "tennis_xgb_v1"
 TRAIN_CUTOFF = date(2023, 1, 1)
-TRAIN_START = date(2019, 1, 1)  # cap dataset to last ~6 years to limit RAM usage
 
 
 def _serialize(model) -> str:
@@ -207,7 +206,7 @@ def train_model(db: Session) -> object:
     logger.info("Building training dataset (in-memory fast path)...")
     cache = _build_memory_cache(db)
     all_matches = [m for m in cache["all_matches"]
-                   if m.winner_id is not None and m.date is not None and m.date >= TRAIN_START]
+                   if m.winner_id is not None]
 
     # Shuffle so StratifiedKFold doesn't see monotone class sequences
     _random.seed(42)
