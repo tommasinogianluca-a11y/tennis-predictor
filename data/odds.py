@@ -260,6 +260,19 @@ def detect_value_bets(db: Session, model_fn) -> list:
     model_fn: callable(player1_id, player2_id, surface, category, db) -> {p1_win_prob, p2_win_prob}
     """
     raw_odds = scrape_upcoming_odds(db)
+    if not raw_odds:
+        logger.info("No odds data — skipping prediction cleanup.")
+        return []
+
+    # Wipe all odds-sourced predictions before rebuilding fresh
+    # (match_date IS NOT NULL identifies predictions created from odds API)
+    deleted = (
+        db.query(Prediction)
+        .filter(Prediction.match_date.isnot(None))
+        .delete(synchronize_session=False)
+    )
+    logger.info("Cleared %d stale odds predictions before refresh.", deleted)
+
     value_bets = []
 
     for odds_data in raw_odds:
@@ -300,40 +313,20 @@ def detect_value_bets(db: Session, model_fn) -> list:
             value_bet_player = 2
             edge = edge_p2
 
-        # Upsert: update existing prediction for same match, avoid duplicates
-        match_date = odds_data.get("match_date")
-        existing = (
-            db.query(Prediction)
-            .filter_by(player1_id=p1.id, player2_id=p2.id)
-            .filter(Prediction.match_date == match_date)
-            .first()
-        ) if match_date else None
-
-        if existing:
-            existing.surface = surface
-            existing.tournament_category = category
-            existing.p1_win_probability = p_model_p1
-            existing.p2_win_probability = p_model_p2
-            existing.value_bet_player = value_bet_player
-            existing.edge_percentage = edge * 100 if edge else None
-            existing.bookmaker_odds_p1 = odds_data["odds_p1"]
-            existing.bookmaker_odds_p2 = odds_data["odds_p2"]
-            prediction = existing
-        else:
-            prediction = Prediction(
-                player1_id=p1.id,
-                player2_id=p2.id,
-                surface=surface,
-                tournament_category=category,
-                match_date=match_date,
-                p1_win_probability=p_model_p1,
-                p2_win_probability=p_model_p2,
-                value_bet_player=value_bet_player,
-                edge_percentage=edge * 100 if edge else None,
-                bookmaker_odds_p1=odds_data["odds_p1"],
-                bookmaker_odds_p2=odds_data["odds_p2"],
-            )
-            db.add(prediction)
+        prediction = Prediction(
+            player1_id=p1.id,
+            player2_id=p2.id,
+            surface=surface,
+            tournament_category=category,
+            match_date=odds_data.get("match_date"),
+            p1_win_probability=p_model_p1,
+            p2_win_probability=p_model_p2,
+            value_bet_player=value_bet_player,
+            edge_percentage=edge * 100 if edge else None,
+            bookmaker_odds_p1=odds_data["odds_p1"],
+            bookmaker_odds_p2=odds_data["odds_p2"],
+        )
+        db.add(prediction)
 
         if value_bet_player:
             stake = kelly_stake(edge, p_model_p1 if value_bet_player == 1 else p_model_p2)
