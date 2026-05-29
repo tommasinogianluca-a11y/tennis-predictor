@@ -17,25 +17,82 @@ from api.auth import (
     set_session_cookie,
 )
 from data.db import (
-    EloRating, Match, News, Player, Prediction, SentimentCache, get_db,
+    EloRating, Match, News, Player, Prediction, SentimentCache, SystemJob, get_db,
 )
+from data.db import SessionLocal as _SessionLocal
 from reports.daily_report import generate_report
 
 router = APIRouter(prefix="/app")
 templates = Jinja2Templates(directory="templates")
 
-# ── In-memory job registry ──────────────────────────────────────────────────
-_jobs: dict[str, dict] = {}
 
+# ── DB-backed job helpers ───────────────────────────────────────────────────
 
-def _new_job() -> str:
+def _new_job(action: str) -> str:
     job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {
-        "status": "running",
-        "log": [],
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }
+    db = _SessionLocal()
+    try:
+        db.add(SystemJob(
+            id=job_id,
+            action=action,
+            status="running",
+            log="",
+            started_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+    finally:
+        db.close()
     return job_id
+
+
+def _get_job(job_id: str) -> Optional[dict]:
+    db = _SessionLocal()
+    try:
+        j = db.query(SystemJob).filter_by(id=job_id).first()
+        if not j:
+            return None
+        return {
+            "status": j.status,
+            "log": j.log.splitlines() if j.log else [],
+            "started_at": j.started_at.isoformat() if j.started_at else None,
+        }
+    finally:
+        db.close()
+
+
+def _append_log(job_id: str, msg: str) -> None:
+    db = _SessionLocal()
+    try:
+        j = db.query(SystemJob).filter_by(id=job_id).with_for_update().first()
+        if j:
+            j.log = (j.log or "") + msg + "\n"
+            db.commit()
+    finally:
+        db.close()
+
+
+def _finish_job(job_id: str, status: str) -> None:
+    db = _SessionLocal()
+    try:
+        j = db.query(SystemJob).filter_by(id=job_id).first()
+        if j:
+            j.status = status
+            j.finished_at = datetime.now(timezone.utc)
+            db.commit()
+    finally:
+        db.close()
+
+
+# Prune jobs older than 7 days to avoid unbounded growth
+def _prune_old_jobs() -> None:
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    db = _SessionLocal()
+    try:
+        db.query(SystemJob).filter(SystemJob.started_at < cutoff).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
 
 
 def _sidebar_context(db: Session) -> dict:
@@ -303,10 +360,10 @@ _ACTION_LABELS = {
 
 
 def _run_action(job_id: str, action: str) -> None:
-    """Run a system action in a background thread, appending log lines to _jobs[job_id]."""
+    """Run a system action in a background thread, persisting log lines to DB."""
 
     def log(msg: str) -> None:
-        _jobs[job_id]["log"].append(msg)
+        _append_log(job_id, msg)
 
     try:
         if action == "scrape":
@@ -371,16 +428,16 @@ def _run_action(job_id: str, action: str) -> None:
 
         else:
             log(f"[ERROR] Unknown action: {action}")
-            _jobs[job_id]["status"] = "failed"
+            _finish_job(job_id, "failed")
             return
 
-        _jobs[job_id]["status"] = "done"
+        _finish_job(job_id, "done")
 
     except Exception as exc:
         import traceback
         log(f"[ERROR] {exc}")
         log(traceback.format_exc())
-        _jobs[job_id]["status"] = "failed"
+        _finish_job(job_id, "failed")
 
 
 @router.get("/system", response_class=HTMLResponse)
@@ -408,12 +465,14 @@ def system_run_action(
             f'<div class="text-red-400 text-sm p-3">Unknown action: {_html.escape(action)}</div>',
             status_code=400,
         )
-    job_id = _new_job()
+    _prune_old_jobs()
+    job_id = _new_job(action)
     t = threading.Thread(target=_run_action, args=(job_id, action), daemon=True)
     t.start()
+    job = _get_job(job_id)
     return templates.TemplateResponse(
         request, "partials/job_status.html",
-        {"job": _jobs[job_id], "job_id": job_id},
+        {"job": job, "job_id": job_id},
     )
 
 
@@ -423,9 +482,15 @@ def system_job_status(
     request: Request,
     _: None = Depends(require_auth),
 ):
-    job = _jobs.get(job_id)
+    job = _get_job(job_id)
     if not job:
-        return HTMLResponse('<div class="text-red-400 text-sm p-3">Job not found.</div>')
+        # No polling attribute → HTMX stops automatically
+        return HTMLResponse(
+            '<div class="text-amber-500 text-xs p-3 bg-[#1a1a2e] rounded">'
+            '⚠️ Job non trovato — il servizio è stato riavviato durante l\'esecuzione. '
+            'Rilancia l\'azione dal pannello System.'
+            '</div>'
+        )
     return templates.TemplateResponse(
         request, "partials/job_status.html",
         {"job": job, "job_id": job_id},

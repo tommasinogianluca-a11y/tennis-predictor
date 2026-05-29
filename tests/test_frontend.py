@@ -117,7 +117,7 @@ def test_system_job_status_not_found():
     c = _authed_client()
     resp = c.get("/app/system/job/nonexistent")
     assert resp.status_code == 200
-    assert b"not found" in resp.content.lower()
+    assert b"non trovato" in resp.content.lower()
 
 
 def test_system_stats_fragment():
