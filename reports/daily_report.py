@@ -36,6 +36,8 @@ def generate_report(db: Session) -> dict:
         entries.append({
             "player1": _name(pred.player1_id),
             "player2": _name(pred.player2_id),
+            "p1_id": pred.player1_id,
+            "p2_id": pred.player2_id,
             "surface": pred.surface,
             "category": pred.tournament_category,
             "p1_win_prob": round(pred.p1_win_probability, 3),
@@ -43,6 +45,7 @@ def generate_report(db: Session) -> dict:
             "value_bet": _name(
                 pred.player1_id if pred.value_bet_player == 1 else pred.player2_id
             ) if pred.value_bet_player else None,
+            "value_bet_player": pred.value_bet_player,   # 1, 2, or None
             "edge_pct": pred.edge_percentage,
             "odds_p1": pred.bookmaker_odds_p1,
             "odds_p2": pred.bookmaker_odds_p2,

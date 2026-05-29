@@ -134,6 +134,31 @@
         </div>
       </div>
 
+      <!-- Line movement badge (visible only after ≥2 odds snapshots) -->
+      {% if bet.movement %}
+      <div class="flex items-center justify-between mb-3 bg-[#0f0f1a] rounded px-3 py-2">
+        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Movimento quota</span>
+        <div class="flex items-center gap-1.5 text-xs font-mono">
+          <span class="text-gray-500">{{ bet.movement.first_odds }}</span>
+          <span class="text-gray-600">→</span>
+          <span class="font-bold
+            {% if bet.movement.direction == 'up' %}text-emerald-400
+            {% elif bet.movement.direction == 'down' %}text-red-400
+            {% else %}text-gray-400{% endif %}">
+            {{ bet.movement.current_odds }}
+          </span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold
+            {% if bet.movement.direction == 'up' %}bg-emerald-900/50 text-emerald-400
+            {% elif bet.movement.direction == 'down' %}bg-red-900/50 text-red-400
+            {% else %}bg-gray-800 text-gray-500{% endif %}">
+            {% if bet.movement.direction == 'up' %}▲{% elif bet.movement.direction == 'down' %}▼{% else %}─{% endif %}
+            {% if bet.movement.pct_change > 0 %}+{% endif %}{{ bet.movement.pct_change }}%
+          </span>
+          <span class="text-gray-600 text-[10px]">{{ bet.movement.snap_count }} check</span>
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Sisal link -->
       {% set sisal_q = (bet.player1.split()[-1] + ' ' + bet.player2.split()[-1]) | urlencode %}
       <a href="https://www.sisal.it/scommesse-sportive/sport/tennis"

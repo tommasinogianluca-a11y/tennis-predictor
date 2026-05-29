@@ -17,7 +17,7 @@ from api.auth import (
     set_session_cookie,
 )
 from data.db import (
-    EloRating, Match, News, Player, Prediction, SentimentCache, SystemJob, get_db,
+    EloRating, Match, News, OddsSnapshot, Player, Prediction, SentimentCache, SystemJob, get_db,
 )
 from data.db import SessionLocal as _SessionLocal
 from reports.daily_report import generate_report
@@ -93,6 +93,49 @@ def _prune_old_jobs() -> None:
         db.commit()
     finally:
         db.close()
+
+
+def _get_movement(bet: dict, db: Session) -> Optional[dict]:
+    """Return line-movement stats for a value bet (first snapshot vs current odds)."""
+    p1_id = bet.get("p1_id")
+    p2_id = bet.get("p2_id")
+    vbp = bet.get("value_bet_player")    # 1 or 2
+    if not p1_id or not p2_id or not vbp:
+        return None
+
+    pa = min(p1_id, p2_id)
+    pb = max(p1_id, p2_id)
+    match_d = bet["match_date"].date() if bet.get("match_date") else None
+
+    snaps = (
+        db.query(OddsSnapshot)
+        .filter_by(player_a_id=pa, player_b_id=pb, match_date=match_d)
+        .order_by(OddsSnapshot.recorded_at.asc())
+        .all()
+    )
+    if len(snaps) < 2:
+        return None  # need at least 2 points to show movement
+
+    first = snaps[0]
+    # Resolve which odds column corresponds to the value player
+    if vbp == 1:
+        first_odds = first.odds_a if pa == p1_id else first.odds_b
+        current_odds = bet.get("odds_p1")
+    else:
+        first_odds = first.odds_b if pa == p1_id else first.odds_a
+        current_odds = bet.get("odds_p2")
+
+    if not first_odds or not current_odds or first_odds <= 0:
+        return None
+
+    pct = (current_odds - first_odds) / first_odds * 100
+    return {
+        "first_odds": round(first_odds, 2),
+        "current_odds": round(current_odds, 2),
+        "pct_change": round(pct, 1),
+        "direction": "up" if pct > 0.5 else "down" if pct < -0.5 else "flat",
+        "snap_count": len(snaps),
+    }
 
 
 def _sidebar_context(db: Session) -> dict:
@@ -187,6 +230,10 @@ def value_bets_page(
         key=lambda x: x.get("edge_pct") or 0,
         reverse=True,
     )
+    # Attach line-movement data to each bet
+    for bet in bets:
+        bet["movement"] = _get_movement(bet, db)
+
     ctx = {
         "active": "value_bets",
         "bets": bets,

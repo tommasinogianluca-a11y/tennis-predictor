@@ -7,7 +7,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from config import ODDS_API_KEY
-from data.db import Player, Prediction
+from data.db import OddsSnapshot, Player, Prediction
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +274,13 @@ def detect_value_bets(db: Session, model_fn) -> list:
     )
     logger.info("Cleared %d stale odds predictions before refresh.", deleted)
 
+    # Prune snapshots older than 14 days to avoid unbounded growth.
+    from datetime import timedelta
+    snap_cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+    db.query(OddsSnapshot).filter(OddsSnapshot.recorded_at < snap_cutoff).delete(
+        synchronize_session=False
+    )
+
     value_bets = []
 
     for odds_data in raw_odds:
@@ -328,6 +335,23 @@ def detect_value_bets(db: Session, model_fn) -> list:
             bookmaker_odds_p2=odds_data["odds_p2"],
         )
         db.add(prediction)
+
+        # Record odds snapshot for line-movement tracking.
+        # Normalise player order so (a_id < b_id) regardless of API ordering.
+        pa_id = min(p1.id, p2.id)
+        pb_id = max(p1.id, p2.id)
+        if pa_id == p1.id:
+            odds_a, odds_b = odds_data["odds_p1"], odds_data["odds_p2"]
+        else:
+            odds_a, odds_b = odds_data["odds_p2"], odds_data["odds_p1"]
+        match_d = odds_data["match_date"].date() if odds_data.get("match_date") else None
+        db.add(OddsSnapshot(
+            player_a_id=pa_id,
+            player_b_id=pb_id,
+            match_date=match_d,
+            odds_a=odds_a,
+            odds_b=odds_b,
+        ))
 
         if value_bet_player:
             stake = kelly_stake(edge, p_model_p1 if value_bet_player == 1 else p_model_p2)
