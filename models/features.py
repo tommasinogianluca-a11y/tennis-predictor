@@ -179,6 +179,115 @@ def _get_sentiment(player_id: int, db: Session) -> float:
     return record.sentiment_score if record else 0.0
 
 
+# ── New features (v2) ─────────────────────────────────────────────────────────
+
+_BIG_CATEGORIES = {"Slam", "Masters"}
+
+
+def _get_ranking_raw(player_id: int, db: Session) -> float:
+    """ATP ranking number. Missing / unranked → 500 (penalty for unknown)."""
+    from data.db import Player
+    p = db.query(Player).filter_by(id=player_id).first()
+    rank = p.current_ranking if p and p.current_ranking else 500
+    return float(rank)
+
+
+def _get_age_score(player_id: int, as_of: date, db: Session) -> float:
+    """Proximity to tennis prime (27 years). Returns -|age - 27|; higher = closer to prime."""
+    from data.db import Player
+    p = db.query(Player).filter_by(id=player_id).first()
+    if not p or not p.dob:
+        return -2.0  # neutral: 2 years off prime
+    age = (as_of - p.dob).days / 365.25
+    return -abs(age - 27.0)
+
+
+def _get_surface_form(player_id: int, surface: str, as_of: date, db: Session, n: int = 10) -> float:
+    """Exponentially-weighted recent form on a specific surface."""
+    from data.db import Match
+    matches = (
+        db.query(Match)
+        .filter(
+            (Match.player1_id == player_id) | (Match.player2_id == player_id),
+            Match.surface == surface,
+            Match.date < as_of,
+            Match.winner_id.isnot(None),
+        )
+        .order_by(Match.date.desc())
+        .limit(n)
+        .all()
+    )
+    results = [1 if m.winner_id == player_id else 0 for m in reversed(matches)]
+    return recent_form(results)
+
+
+def _get_second_serve_rate(player_id: int, as_of: date, db: Session) -> float:
+    """Average second-serve won pct over last 20 matches with stats."""
+    from data.db import Match, MatchStats
+    stats = (
+        db.query(MatchStats)
+        .join(Match, MatchStats.match_id == Match.id)
+        .filter(
+            MatchStats.player_id == player_id,
+            Match.date < as_of,
+            MatchStats.second_serve_won_pct.isnot(None),
+        )
+        .order_by(Match.date.desc())
+        .limit(20)
+        .all()
+    )
+    if not stats:
+        return 0.5
+    return float(np.mean([s.second_serve_won_pct / 100 for s in stats]))
+
+
+def _get_aggression_index(player_id: int, as_of: date, db: Session) -> float:
+    """Winners / (winners + unforced_errors). Higher = more aggressive and clean."""
+    from data.db import Match, MatchStats
+    stats = (
+        db.query(MatchStats)
+        .join(Match, MatchStats.match_id == Match.id)
+        .filter(
+            MatchStats.player_id == player_id,
+            Match.date < as_of,
+            MatchStats.winners.isnot(None),
+            MatchStats.unforced_errors.isnot(None),
+        )
+        .order_by(Match.date.desc())
+        .limit(20)
+        .all()
+    )
+    if not stats:
+        return 0.5
+    ratios = []
+    for s in stats:
+        total = (s.winners or 0) + (s.unforced_errors or 0)
+        if total > 0:
+            ratios.append(s.winners / total)
+    return float(np.mean(ratios)) if ratios else 0.5
+
+
+def _get_big_match_winrate(player_id: int, as_of: date, db: Session) -> float:
+    """Win rate in Slams + Masters over last 2 years. Separates grinders from chokers."""
+    from data.db import Match
+    cutoff = as_of - TWO_YEARS
+    matches = (
+        db.query(Match)
+        .filter(
+            (Match.player1_id == player_id) | (Match.player2_id == player_id),
+            Match.tournament_category.in_(_BIG_CATEGORIES),
+            Match.date >= cutoff,
+            Match.date < as_of,
+            Match.winner_id.isnot(None),
+        )
+        .all()
+    )
+    if not matches:
+        return 0.5
+    wins = sum(1 for m in matches if m.winner_id == player_id)
+    return wins / len(matches)
+
+
 def build_feature_vector(
     player1_id: int,
     player2_id: int,
@@ -221,7 +330,27 @@ def build_feature_vector(
     sent_p1 = _get_sentiment(player1_id, db)
     sent_p2 = _get_sentiment(player2_id, db)
 
+    # ── v2 features ──────────────────────────────────────────────────────────
+    rank_p1 = _get_ranking_raw(player1_id, db)
+    rank_p2 = _get_ranking_raw(player2_id, db)
+
+    age_p1 = _get_age_score(player1_id, as_of, db)
+    age_p2 = _get_age_score(player2_id, as_of, db)
+
+    surf_form_p1 = _get_surface_form(player1_id, surface, as_of, db)
+    surf_form_p2 = _get_surface_form(player2_id, surface, as_of, db)
+
+    second_p1 = _get_second_serve_rate(player1_id, as_of, db)
+    second_p2 = _get_second_serve_rate(player2_id, as_of, db)
+
+    aggr_p1 = _get_aggression_index(player1_id, as_of, db)
+    aggr_p2 = _get_aggression_index(player2_id, as_of, db)
+
+    big_p1 = _get_big_match_winrate(player1_id, as_of, db)
+    big_p2 = _get_big_match_winrate(player2_id, as_of, db)
+
     return [
+        # ── v1 (12 features) ─────────────────────────────────────────────────
         float(elo_p1 - elo_p2),
         float(wr_p1 - wr_p2),
         float(h2h_rate),
@@ -234,4 +363,11 @@ def build_feature_vector(
         float(form_p1 - form_p2),
         float(fatigue_p1 - fatigue_p2),
         float(sent_p1 - sent_p2),
+        # ── v2 (6 new features) ──────────────────────────────────────────────
+        float(rank_p2 - rank_p1),          # positive = p1 better ranked
+        float(age_p1 - age_p2),            # positive = p1 closer to prime age
+        float(surf_form_p1 - surf_form_p2),
+        float(second_p1 - second_p2),
+        float(aggr_p1 - aggr_p2),
+        float(big_p1 - big_p2),
     ]

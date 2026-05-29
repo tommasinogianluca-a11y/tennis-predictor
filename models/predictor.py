@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from models.features import build_feature_vector
 
 logger = logging.getLogger(__name__)
-MODEL_NAME = "tennis_xgb_v1"
+MODEL_NAME = "tennis_xgb_v2"  # bumped: 18 features (was 12)
 TRAIN_CUTOFF = date(2023, 1, 1)
 
 
@@ -94,22 +94,28 @@ def _build_memory_cache(db: Session) -> dict:
     for sc in db.query(SentimentCache).all():
         sentiment_map[sc.player_id] = sc.sentiment_score
 
+    logger.info("Loading player data (ranking, dob)...")
+    from data.db import Player
+    player_map: dict = {p.id: p for p in db.query(Player).all()}
+
     return {
         "all_matches": all_matches,
         "player_matches": dict(player_matches),
         "elo_map": elo_map,
         "stats_map": dict(stats_map),
         "sentiment_map": sentiment_map,
+        "player_map": player_map,
     }
 
 
 def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
                          tournament_category: str, as_of: date,
                          tournament_name: str, cache: dict) -> list:
-    """Build feature vector using in-memory cache — no DB queries."""
+    """Build feature vector using in-memory cache — no DB queries. 18 features (v2)."""
     from datetime import timedelta
     from models.features import exponential_weights, recent_form, tournament_prestige
 
+    _BIG_CATEGORIES = {"Slam", "Masters"}
     TWO_YEARS = timedelta(days=730)
     ONE_MONTH = timedelta(days=30)
     cutoff_2y = as_of - TWO_YEARS
@@ -119,6 +125,7 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
     player_matches = cache["player_matches"]
     stats_map = cache["stats_map"]
     sentiment_map = cache["sentiment_map"]
+    player_map = cache["player_map"]
 
     def get_elo(pid: int) -> float:
         return elo_map.get((pid, surface), 1500.0)
@@ -185,7 +192,57 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         return sum(1 for m in get_player_matches_before(pid)
                    if m.date >= cutoff_1m)
 
+    # ── v2 helpers ────────────────────────────────────────────────────────────
+
+    def get_ranking(pid: int) -> float:
+        p = player_map.get(pid)
+        rank = p.current_ranking if p and p.current_ranking else 500
+        return float(rank)
+
+    def get_age_score(pid: int) -> float:
+        p = player_map.get(pid)
+        if not p or not p.dob:
+            return -2.0
+        age = (as_of - p.dob).days / 365.25
+        return -abs(age - 27.0)
+
+    def get_surface_form(pid: int) -> float:
+        ms = [m for m in get_player_matches_before(pid)
+              if m.surface == surface and m.winner_id is not None][-10:]
+        results = [1 if m.winner_id == pid else 0 for m in ms]
+        return recent_form(results)
+
+    def get_second_serve(pid: int) -> float:
+        all_stats = stats_map.get(pid, [])
+        valid = [s for s in all_stats if s.second_serve_won_pct][-20:]
+        if not valid:
+            return 0.5
+        return float(np.mean([s.second_serve_won_pct / 100 for s in valid]))
+
+    def get_aggression(pid: int) -> float:
+        all_stats = stats_map.get(pid, [])
+        valid = [s for s in all_stats
+                 if s.winners is not None and s.unforced_errors is not None][-20:]
+        if not valid:
+            return 0.5
+        ratios = []
+        for s in valid:
+            total = (s.winners or 0) + (s.unforced_errors or 0)
+            if total > 0:
+                ratios.append(s.winners / total)
+        return float(np.mean(ratios)) if ratios else 0.5
+
+    def get_big_match_winrate(pid: int) -> float:
+        ms = [m for m in get_player_matches_before(pid)
+              if m.tournament_category in _BIG_CATEGORIES
+              and m.date >= cutoff_2y and m.winner_id is not None]
+        if not ms:
+            return 0.5
+        wins = sum(1 for m in ms if m.winner_id == pid)
+        return wins / len(ms)
+
     return [
+        # ── v1 (12) ───────────────────────────────────────────────────────────
         float(get_elo(p1_id) - get_elo(p2_id)),
         float(get_surface_winrate(p1_id) - get_surface_winrate(p2_id)),
         float(get_h2h(with_surface=False)),
@@ -198,6 +255,13 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         float(get_recent_form(p1_id) - get_recent_form(p2_id)),
         float(get_fatigue(p1_id) - get_fatigue(p2_id)),
         float(sentiment_map.get(p1_id, 0.0) - sentiment_map.get(p2_id, 0.0)),
+        # ── v2 (6 new) ────────────────────────────────────────────────────────
+        float(get_ranking(p2_id) - get_ranking(p1_id)),      # positive = p1 better ranked
+        float(get_age_score(p1_id) - get_age_score(p2_id)),  # positive = p1 closer to prime
+        float(get_surface_form(p1_id) - get_surface_form(p2_id)),
+        float(get_second_serve(p1_id) - get_second_serve(p2_id)),
+        float(get_aggression(p1_id) - get_aggression(p2_id)),
+        float(get_big_match_winrate(p1_id) - get_big_match_winrate(p2_id)),
     ]
 
 
