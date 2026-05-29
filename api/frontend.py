@@ -381,22 +381,16 @@ def _run_action(job_id: str, action: str) -> None:
                 db.close()
 
         elif action == "retrain":
-            import io
-            from contextlib import redirect_stdout
             import models.predictor as pred_module
             from data.db import SessionLocal
             from models.predictor import train_model
-            log("[INFO] Starting model retrain (~5 min)...")
+            log("[INFO] Retrain avviato...")
             db = SessionLocal()
             try:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    new_model = train_model(db)
-                for line in buf.getvalue().strip().splitlines():
-                    log(line)
+                new_model = train_model(db, log_cb=log)
                 with pred_module._model_lock:
                     pred_module._cached_model = new_model
-                log("[OK] Retrain complete. ✅")
+                log("[OK] Retrain completato. ✅")
             finally:
                 db.close()
 

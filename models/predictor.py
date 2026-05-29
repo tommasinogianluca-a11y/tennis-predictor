@@ -265,12 +265,23 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
     ]
 
 
-def train_model(db: Session) -> object:
+def train_model(db: Session, log_cb=None) -> object:
+    """Train XGBoost model. log_cb(msg) is called with progress lines in real-time."""
     import random as _random
-    logger.info("Building training dataset (in-memory fast path)...")
+
+    def emit(msg: str) -> None:
+        logger.info(msg)
+        if log_cb:
+            try:
+                log_cb(msg)
+            except Exception:
+                pass  # never let logging failure abort training
+
+    emit("[INFO] Loading data into memory...")
     cache = _build_memory_cache(db)
     all_matches = [m for m in cache["all_matches"]
                    if m.winner_id is not None]
+    emit(f"[INFO] {len(all_matches)} completed matches found.")
 
     # Shuffle so StratifiedKFold doesn't see monotone class sequences
     _random.seed(42)
@@ -279,9 +290,10 @@ def train_model(db: Session) -> object:
     X_train, y_train, X_test, y_test = [], [], [], []
     skipped = 0
     total = len(all_matches)
+    emit(f"[INFO] Building feature vectors for {total} matches...")
     for i, match in enumerate(all_matches):
-        if i % 10000 == 0:
-            print(f"[TRAIN] Features {i}/{total}...", flush=True)
+        if i % 10000 == 0 and i > 0:
+            emit(f"[INFO] Features {i}/{total}...")
         try:
             # Seeder always stores winner as player1 → all labels would be 1.
             # Randomly flip 50% of samples to create balanced dataset.
@@ -308,14 +320,10 @@ def train_model(db: Session) -> object:
             skipped += 1
             logger.debug("Skipped match %s: %s", getattr(match, 'id', '?'), exc)
 
-    logger.info(
-        "Dataset: %d train, %d test, %d skipped.",
-        len(X_train), len(X_test), skipped,
-    )
-    print(f"[TRAIN] Dataset built: {len(X_train)} train, {len(X_test)} test, {skipped} skipped", flush=True)
+    emit(f"[INFO] Dataset: {len(X_train)} train / {len(X_test)} test / {skipped} skipped.")
 
     if len(X_train) < 100:
-        raise RuntimeError("Not enough training data (need >= 100 matches).")
+        raise RuntimeError(f"Not enough training data: only {len(X_train)} train samples (need ≥100). Run Scrape first.")
 
     X_tr = np.array(X_train, dtype=float)
     y_tr = np.array(y_train, dtype=int)
@@ -326,29 +334,28 @@ def train_model(db: Session) -> object:
     X_fit, X_cal, y_fit, y_cal = train_test_split(
         X_tr, y_tr, test_size=0.2, random_state=42, stratify=y_tr
     )
-
-    print("[TRAIN] Fitting XGBoost (tree_method=hist, cv=prefit)...", flush=True)
+    emit(f"[INFO] Fitting XGBoost on {len(X_fit)} samples (tree_method=hist)...")
     base = xgb.XGBClassifier(
         n_estimators=150, max_depth=4, learning_rate=0.05,
         subsample=0.8, colsample_bytree=0.8,
         eval_metric="logloss",
-        n_jobs=1,          # serial: no thread-level RAM spike
+        n_jobs=1,            # serial: no thread-level RAM spike
         tree_method="hist",  # histogram splits: ~50% less RAM than exact
     )
     base.fit(X_fit, y_fit)
+    emit("[INFO] Calibrating probabilities (Platt scaling)...")
     model = CalibratedClassifierCV(base, method="sigmoid", cv="prefit")
     model.fit(X_cal, y_cal)
 
-    if X_test:
+    if X_test and len(X_test) >= 10:
         X_te = np.array(X_test, dtype=float)
         y_te = np.array(y_test, dtype=int)
         proba = model.predict_proba(X_te)[:, 1]
-        logger.info(
-            "Eval — Brier: %.4f  LogLoss: %.4f",
-            brier_score_loss(y_te, proba),
-            log_loss(y_te, proba),
-        )
+        brier = brier_score_loss(y_te, proba)
+        ll = log_loss(y_te, proba)
+        emit(f"[INFO] Eval ({len(X_test)} samples) — Brier: {brier:.4f}  LogLoss: {ll:.4f}")
 
+    emit("[INFO] Saving model to DB...")
     save_model(model, db)
     return model
 
