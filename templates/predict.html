@@ -12,16 +12,45 @@
     hx-indicator="#predict-spinner"
   >
     <div class="grid grid-cols-2 gap-3 mb-3">
-      <div>
-        <label class="block text-gray-400 text-xs mb-1">Player 1 ID</label>
-        <input type="number" name="player1_id" required
-          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+
+      <!-- Player 1 autocomplete -->
+      <div x-data="playerSearch()" class="relative">
+        <label class="block text-gray-400 text-xs mb-1">Player 1</label>
+        <input type="hidden" name="player1_id" :value="selectedId" required>
+        <input
+          type="text"
+          autocomplete="off"
+          placeholder="Cerca nome..."
+          x-model="query"
+          @input.debounce.300ms="search"
+          @focus="open = true"
+          @blur="closeDelayed"
+          @keydown.escape="close"
+          :class="selectedId ? 'border-purple-600' : 'border-[#2a2a3e]'"
+          class="w-full bg-[#0f0f1a] border rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600"
+        >
+        <div x-show="open" x-cloak x-ref="dropdown" class="relative z-10"></div>
       </div>
-      <div>
-        <label class="block text-gray-400 text-xs mb-1">Player 2 ID</label>
-        <input type="number" name="player2_id" required
-          class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600">
+
+      <!-- Player 2 autocomplete -->
+      <div x-data="playerSearch()" class="relative">
+        <label class="block text-gray-400 text-xs mb-1">Player 2</label>
+        <input type="hidden" name="player2_id" :value="selectedId" required>
+        <input
+          type="text"
+          autocomplete="off"
+          placeholder="Cerca nome..."
+          x-model="query"
+          @input.debounce.300ms="search"
+          @focus="open = true"
+          @blur="closeDelayed"
+          @keydown.escape="close"
+          :class="selectedId ? 'border-purple-600' : 'border-[#2a2a3e]'"
+          class="w-full bg-[#0f0f1a] border rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600"
+        >
+        <div x-show="open" x-cloak x-ref="dropdown" class="relative z-10"></div>
       </div>
+
     </div>
 
     <div class="grid grid-cols-2 gap-3 mb-4">
@@ -58,7 +87,49 @@
 
 <div id="predict-result" class="mt-4 max-w-md"></div>
 
+<script>
+function playerSearch() {
+  return {
+    query: '',
+    selectedId: null,
+    open: false,
+
+    async search() {
+      this.selectedId = null;
+      if (this.query.length < 2) {
+        this.open = false;
+        this.$refs.dropdown.innerHTML = '';
+        return;
+      }
+      const resp = await fetch('/app/players/autocomplete?q=' + encodeURIComponent(this.query));
+      const html = await resp.text();
+      this.$refs.dropdown.innerHTML = html;
+      this.open = html.trim().length > 0;
+      // Wire up click handlers on rendered items
+      this.$refs.dropdown.querySelectorAll('li[data-id]').forEach(li => {
+        li.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          this.selectedId = li.dataset.id;
+          this.query = li.dataset.name;
+          this.open = false;
+          this.$refs.dropdown.innerHTML = '';
+        });
+      });
+    },
+
+    close() {
+      this.open = false;
+    },
+
+    closeDelayed() {
+      setTimeout(() => { this.open = false; }, 150);
+    },
+  };
+}
+</script>
+
 <style>
+  [x-cloak] { display: none !important; }
   .htmx-indicator { display: none; }
   .htmx-indicator.htmx-request { display: block !important; }
 </style>

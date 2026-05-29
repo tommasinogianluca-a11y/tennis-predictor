@@ -394,6 +394,28 @@ def system_stats(
     )
 
 
+@router.get("/players/autocomplete", response_class=HTMLResponse)
+def players_autocomplete(
+    request: Request,
+    q: str = "",
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    players = []
+    if q and len(q) >= 2:
+        players = (
+            db.query(Player)
+            .filter(Player.name.ilike(f"%{q}%"))
+            .order_by(Player.current_ranking.asc())
+            .limit(8)
+            .all()
+        )
+    return templates.TemplateResponse(
+        request, "partials/player_autocomplete.html",
+        {"players": players},
+    )
+
+
 @router.get("/players/search", response_class=HTMLResponse)
 def players_search(
     request: Request,
