@@ -17,7 +17,7 @@ from api.auth import (
     set_session_cookie,
 )
 from data.db import (
-    EloRating, Match, Player, Prediction, get_db,
+    EloRating, Match, News, Player, Prediction, SentimentCache, get_db,
 )
 from reports.daily_report import generate_report
 
@@ -214,6 +214,67 @@ def predict_submit(
         request, "partials/predict_result.html",
         {"result": result, "error": error},
     )
+
+
+# ── News ─────────────────────────────────────────────────────────────────────
+
+@router.get("/news", response_class=HTMLResponse)
+def news_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    # Recent news, most recent first, limit 100
+    articles = (
+        db.query(News)
+        .order_by(News.published_at.desc().nulls_last(), News.id.desc())
+        .limit(100)
+        .all()
+    )
+
+    # Player name lookup
+    player_ids = {a.player_id for a in articles if a.player_id}
+    players = {
+        p.id: p.name
+        for p in db.query(Player).filter(Player.id.in_(player_ids)).all()
+    } if player_ids else {}
+
+    # Sentiment cache per player
+    sentiments = {
+        s.player_id: s
+        for s in db.query(SentimentCache)
+        .filter(SentimentCache.player_id.in_(player_ids))
+        .all()
+    } if player_ids else {}
+
+    # Group articles by player
+    from collections import defaultdict
+    grouped: dict = defaultdict(list)
+    ungrouped = []
+    for a in articles:
+        if a.player_id:
+            grouped[a.player_id].append(a)
+        else:
+            ungrouped.append(a)
+
+    player_groups = []
+    for pid, arts in sorted(grouped.items(), key=lambda x: x[0]):
+        sent = sentiments.get(pid)
+        player_groups.append({
+            "player_id": pid,
+            "player_name": players.get(pid, f"Player #{pid}"),
+            "articles": arts,
+            "sentiment": sent,
+        })
+
+    ctx = {
+        "active": "news",
+        "player_groups": player_groups,
+        "ungrouped": ungrouped,
+        "total": len(articles),
+        **_sidebar_context(db),
+    }
+    return templates.TemplateResponse(request, "news.html", ctx)
 
 
 # ── Players ──────────────────────────────────────────────────────────────────
