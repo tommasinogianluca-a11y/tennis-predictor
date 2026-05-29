@@ -46,6 +46,7 @@ def generate_report(db: Session) -> dict:
             "edge_pct": pred.edge_percentage,
             "odds_p1": pred.bookmaker_odds_p1,
             "odds_p2": pred.bookmaker_odds_p2,
+            "match_date": pred.match_date,
         })
 
     value_bets = [e for e in entries if e["value_bet"]]

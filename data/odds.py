@@ -1,5 +1,6 @@
 import logging
 import unicodedata
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -121,6 +122,15 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
                             away_odds_list.append(outcome["price"])
             if not home_odds_list or not away_odds_list:
                 continue
+            commence_time = match.get("commence_time")
+            match_dt = None
+            if commence_time:
+                try:
+                    match_dt = datetime.fromisoformat(
+                        commence_time.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    pass
             results.append({
                 "player1": home,
                 "player2": away,
@@ -128,6 +138,7 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
                 "odds_p2": round(sum(away_odds_list) / len(away_odds_list), 3),
                 "surface": surface,
                 "category": category,
+                "match_date": match_dt,
             })
         except (KeyError, ZeroDivisionError):
             continue
@@ -294,6 +305,7 @@ def detect_value_bets(db: Session, model_fn) -> list:
             player2_id=p2.id,
             surface=surface,
             tournament_category=category,
+            match_date=odds_data.get("match_date"),
             p1_win_probability=p_model_p1,
             p2_win_probability=p_model_p2,
             value_bet_player=value_bet_player,

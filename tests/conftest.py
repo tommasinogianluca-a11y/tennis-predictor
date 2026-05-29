@@ -9,3 +9,13 @@ os.environ.setdefault("DASHBOARD_PASSWORD", "test-dashboard-pass")
 
 # Mock xgboost before it's imported (libomp missing on this dev machine)
 sys.modules.setdefault("xgboost", MagicMock())
+
+import pytest
+
+@pytest.fixture(autouse=True, scope="session")
+def create_test_db():
+    """Ensure all tables exist in the test SQLite DB."""
+    from data.db import Base, engine
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
