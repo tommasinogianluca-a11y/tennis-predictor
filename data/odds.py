@@ -9,9 +9,31 @@ from data.db import Player, Prediction
 
 logger = logging.getLogger(__name__)
 
-ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/tennis_atp/odds/"
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 KELLY_FRACTION = 0.25
 EDGE_THRESHOLD = 0.05
+
+
+def _active_atp_sport_keys() -> list[str]:
+    """Return all currently active ATP tennis sport keys from the Odds API."""
+    if not ODDS_API_KEY:
+        return []
+    try:
+        resp = requests.get(
+            f"{ODDS_API_BASE}/sports/",
+            params={"apiKey": ODDS_API_KEY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return [
+            s["key"] for s in resp.json()
+            if s.get("group") == "Tennis"
+            and "atp" in s["key"].lower()
+            and s.get("active", False)
+        ]
+    except requests.RequestException as e:
+        logger.error("Odds API sports list failed: %s", e)
+        return []
 
 
 def _normalize_odds(odds_list: list) -> list:
@@ -30,15 +52,11 @@ def kelly_stake(edge: float, p_model: float) -> float:
     return max(0.0, ((edge * p_model) / (1.0 - p_model)) * KELLY_FRACTION)
 
 
-def scrape_upcoming_odds(db: Session) -> list:
-    """Fetch upcoming ATP match odds from the-odds-api.com."""
-    if not ODDS_API_KEY:
-        logger.warning("ODDS_API_KEY not set — skipping odds fetch.")
-        return []
-
+def _fetch_odds_for_sport(sport_key: str) -> list:
+    """Fetch h2h odds for a single sport key. Returns list of match dicts."""
     try:
         resp = requests.get(
-            ODDS_API_URL,
+            f"{ODDS_API_BASE}/sports/{sport_key}/odds/",
             params={
                 "apiKey": ODDS_API_KEY,
                 "regions": "eu",
@@ -49,22 +67,18 @@ def scrape_upcoming_odds(db: Session) -> list:
         )
         resp.raise_for_status()
     except requests.RequestException as e:
-        logger.error("Odds API request failed: %s", e)
+        logger.error("Odds API [%s] request failed: %s", sport_key, e)
         return []
 
     remaining = resp.headers.get("x-requests-remaining", "?")
     used = resp.headers.get("x-requests-used", "?")
-    logger.info("Odds API: used=%s remaining=%s", used, remaining)
+    logger.info("Odds API [%s]: used=%s remaining=%s", sport_key, used, remaining)
 
-    data = resp.json()
     results = []
-
-    for match in data:
+    for match in resp.json():
         try:
             home = match["home_team"]
             away = match["away_team"]
-
-            # Average h2h odds across bookmakers
             home_odds_list, away_odds_list = [], []
             for bookie in match.get("bookmakers", []):
                 for market in bookie.get("markets", []):
@@ -75,23 +89,36 @@ def scrape_upcoming_odds(db: Session) -> list:
                             home_odds_list.append(outcome["price"])
                         elif outcome["name"] == away:
                             away_odds_list.append(outcome["price"])
-
             if not home_odds_list or not away_odds_list:
                 continue
-
-            odds_p1 = round(sum(home_odds_list) / len(home_odds_list), 3)
-            odds_p2 = round(sum(away_odds_list) / len(away_odds_list), 3)
-
             results.append({
                 "player1": home,
                 "player2": away,
-                "odds_p1": odds_p1,
-                "odds_p2": odds_p2,
+                "odds_p1": round(sum(home_odds_list) / len(home_odds_list), 3),
+                "odds_p2": round(sum(away_odds_list) / len(away_odds_list), 3),
             })
         except (KeyError, ZeroDivisionError):
             continue
+    return results
 
-    logger.info("Odds API: parsed %d upcoming ATP matches.", len(results))
+
+def scrape_upcoming_odds(db: Session) -> list:
+    """Fetch upcoming ATP match odds from the-odds-api.com."""
+    if not ODDS_API_KEY:
+        logger.warning("ODDS_API_KEY not set — skipping odds fetch.")
+        return []
+
+    sport_keys = _active_atp_sport_keys()
+    if not sport_keys:
+        logger.warning("No active ATP tennis events on Odds API right now.")
+        return []
+
+    logger.info("Active ATP sport keys: %s", sport_keys)
+    results = []
+    for key in sport_keys:
+        results.extend(_fetch_odds_for_sport(key))
+
+    logger.info("Odds API: parsed %d upcoming ATP matches total.", len(results))
     return results
 
 
