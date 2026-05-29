@@ -408,6 +408,7 @@ _ACTION_LABELS = {
     "retrain": "🧠 Retrain",
     "refresh_odds": "💹 Refresh Odds",
     "fetch_news": "📰 Fetch News",
+    "backtest": "📊 Backtest",
 }
 
 
@@ -470,6 +471,17 @@ def _run_action(job_id: str, action: str) -> None:
                 log("[INFO] Running sentiment analysis...")
                 run_sentiment_update(db)
                 log("[OK] News and sentiment updated. ✅")
+            finally:
+                db.close()
+
+        elif action == "backtest":
+            from data.db import SessionLocal
+            from scripts.backtest import run_backtest
+            from models.predictor import TRAIN_CUTOFF
+            log("[INFO] Backtest avviato (holdout >= 2023-01-01)...")
+            db = SessionLocal()
+            try:
+                run_backtest(db, log_cb=log)
             finally:
                 db.close()
 
