@@ -320,15 +320,24 @@ def train_model(db: Session) -> object:
     X_tr = np.array(X_train, dtype=float)
     y_tr = np.array(y_train, dtype=int)
 
-    print("[TRAIN] Fitting XGBoost (CalibratedCV cv=5)...", flush=True)
-    base = xgb.XGBClassifier(
-        n_estimators=200, max_depth=4, learning_rate=0.05,
-        subsample=0.8, colsample_bytree=0.8,
-        use_label_encoder=False, eval_metric="logloss",
-        n_jobs=1,  # serial to limit peak RAM on Railway
+    # Split 80/20 for fit vs Platt calibration.
+    # cv="prefit" trains only 1 model (vs cv=3 which trains 3) — ~3× less peak RAM.
+    from sklearn.model_selection import train_test_split
+    X_fit, X_cal, y_fit, y_cal = train_test_split(
+        X_tr, y_tr, test_size=0.2, random_state=42, stratify=y_tr
     )
-    model = CalibratedClassifierCV(base, method="sigmoid", cv=3)  # cv=3 saves ~40% RAM vs cv=5
-    model.fit(X_tr, y_tr)
+
+    print("[TRAIN] Fitting XGBoost (tree_method=hist, cv=prefit)...", flush=True)
+    base = xgb.XGBClassifier(
+        n_estimators=150, max_depth=4, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8,
+        eval_metric="logloss",
+        n_jobs=1,          # serial: no thread-level RAM spike
+        tree_method="hist",  # histogram splits: ~50% less RAM than exact
+    )
+    base.fit(X_fit, y_fit)
+    model = CalibratedClassifierCV(base, method="sigmoid", cv="prefit")
+    model.fit(X_cal, y_cal)
 
     if X_test:
         X_te = np.array(X_test, dtype=float)
