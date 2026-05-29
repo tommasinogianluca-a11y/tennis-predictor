@@ -300,10 +300,11 @@ def _xgb_config(n_samples: int) -> dict:
     )
 
 
-def train_model(db: Session, surface: str = "global", log_cb=None) -> object:
+def train_model(db: Session, surface: str = "global", log_cb=None, _cache=None) -> object:
     """
     Train XGBoost model for a specific surface (or 'global' for all surfaces).
     log_cb(msg) is called in real-time for UI progress.
+    _cache: pre-built memory cache (pass from train_all_models to avoid 5× DB reload).
     """
     import random as _random
 
@@ -316,8 +317,12 @@ def train_model(db: Session, surface: str = "global", log_cb=None) -> object:
                 pass
 
     label = surface.upper()
-    emit(f"[INFO] [{label}] Loading data into memory...")
-    cache = _build_memory_cache(db)
+    if _cache is None:
+        emit(f"[INFO] [{label}] Loading data into memory...")
+        cache = _build_memory_cache(db)
+    else:
+        emit(f"[INFO] [{label}] Using shared memory cache.")
+        cache = _cache
     all_matches = [m for m in cache["all_matches"] if m.winner_id is not None]
 
     # Surface-specific models train only on matching surface matches
@@ -414,6 +419,7 @@ def train_model(db: Session, surface: str = "global", log_cb=None) -> object:
 def train_all_models(db: Session, log_cb=None) -> dict:
     """
     Train global + all surface-specific models in sequence.
+    Builds memory cache ONCE and reuses across all 5 training runs.
     Returns dict of surface → model for all successfully trained models.
     """
     def emit(msg: str) -> None:
@@ -424,24 +430,31 @@ def train_all_models(db: Session, log_cb=None) -> dict:
             except Exception:
                 pass
 
+    # Build DB cache once — avoids 5× full reload (main OOM cause)
+    emit("[INFO] Building shared memory cache (1× DB load for all models)...")
+    shared_cache = _build_memory_cache(db)
+    emit(f"[INFO] Cache ready: {len(shared_cache['all_matches'])} matches loaded.")
+
     trained = {}
 
     # Global first — serves as fallback for any surface
     emit("[INFO] ===== Training GLOBAL model (1/5) =====")
     try:
-        trained["global"] = train_model(db, surface="global", log_cb=log_cb)
-    except RuntimeError as e:
+        trained["global"] = train_model(db, surface="global", log_cb=log_cb, _cache=shared_cache)
+    except Exception as e:
         emit(f"[ERROR] Global model failed: {e}")
+        import traceback as _tb
+        emit(_tb.format_exc())
 
     # Surface-specific models
     for idx, surf in enumerate(SURFACES, start=2):
         emit(f"[INFO] ===== Training {surf.upper()} model ({idx}/5) =====")
         try:
-            trained[surf] = train_model(db, surface=surf, log_cb=log_cb)
-        except RuntimeError as e:
+            trained[surf] = train_model(db, surface=surf, log_cb=log_cb, _cache=shared_cache)
+        except Exception as e:
             emit(f"[WARN] {surf}: {e} — will use global fallback.")
 
-    emit(f"[OK] Training complete — {len(trained)} models trained. ✅")
+    emit(f"[OK] Training complete — {len(trained)} models trained: {list(trained.keys())}. ✅")
     return trained
 
 
