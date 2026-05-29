@@ -264,11 +264,12 @@ def detect_value_bets(db: Session, model_fn) -> list:
         logger.info("No odds data — skipping prediction cleanup.")
         return []
 
-    # Wipe all odds-sourced predictions before rebuilding fresh
-    # (match_date IS NOT NULL identifies predictions created from odds API)
+    # Wipe all odds-sourced predictions before rebuilding fresh.
+    # bookmaker_odds_p1 IS NOT NULL is the universal marker for API-sourced
+    # predictions (manual predict form never sets bookmaker odds).
     deleted = (
         db.query(Prediction)
-        .filter(Prediction.match_date.isnot(None))
+        .filter(Prediction.bookmaker_odds_p1.isnot(None))
         .delete(synchronize_session=False)
     )
     logger.info("Cleared %d stale odds predictions before refresh.", deleted)
