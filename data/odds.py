@@ -13,6 +13,34 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 KELLY_FRACTION = 0.25
 EDGE_THRESHOLD = 0.05
 
+# Map Odds API sport key fragments → (surface, category)
+_SPORT_KEY_META = {
+    "french_open":    ("clay",  "Slam"),
+    "roland_garros":  ("clay",  "Slam"),
+    "wimbledon":      ("grass", "Slam"),
+    "us_open":        ("hard",  "Slam"),
+    "australian":     ("hard",  "Slam"),
+    "miami":          ("hard",  "Masters"),
+    "indian_wells":   ("hard",  "Masters"),
+    "madrid":         ("clay",  "Masters"),
+    "rome":           ("clay",  "Masters"),
+    "montreal":       ("hard",  "Masters"),
+    "cincinnati":     ("hard",  "Masters"),
+    "shanghai":       ("hard",  "Masters"),
+    "paris":          ("indoor","Masters"),
+    "toronto":        ("hard",  "Masters"),
+    "canada":         ("hard",  "Masters"),
+}
+
+
+def _surface_category_for_key(sport_key: str) -> tuple[str, str]:
+    """Derive surface and tournament category from Odds API sport key."""
+    key_lower = sport_key.lower()
+    for fragment, (surface, category) in _SPORT_KEY_META.items():
+        if fragment in key_lower:
+            return surface, category
+    return "hard", "250"  # safe default
+
 
 def _active_atp_sport_keys() -> list[str]:
     """Return all currently active ATP tennis sport keys from the Odds API."""
@@ -74,6 +102,7 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
     used = resp.headers.get("x-requests-used", "?")
     logger.info("Odds API [%s]: used=%s remaining=%s", sport_key, used, remaining)
 
+    surface, category = _surface_category_for_key(sport_key)
     results = []
     for match in resp.json():
         try:
@@ -96,6 +125,8 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
                 "player2": away,
                 "odds_p1": round(sum(home_odds_list) / len(home_odds_list), 3),
                 "odds_p2": round(sum(away_odds_list) / len(away_odds_list), 3),
+                "surface": surface,
+                "category": category,
             })
         except (KeyError, ZeroDivisionError):
             continue
@@ -122,6 +153,26 @@ def scrape_upcoming_odds(db: Session) -> list:
     return results
 
 
+def _find_player(db: Session, full_name: str) -> Optional[object]:
+    """Find a player by full name using progressively looser matching."""
+    # 1. Exact match
+    p = db.query(Player).filter(Player.name.ilike(full_name)).first()
+    if p:
+        return p
+    # 2. Last name match
+    last = full_name.split()[-1]
+    candidates = db.query(Player).filter(Player.name.ilike(f"%{last}%")).all()
+    if len(candidates) == 1:
+        return candidates[0]
+    # 3. Among last-name candidates, check first name initial
+    if len(candidates) > 1 and len(full_name.split()) >= 2:
+        first_initial = full_name.split()[0][0].lower()
+        for c in candidates:
+            if c.name.lower().startswith(first_initial):
+                return c
+    return candidates[0] if candidates else None
+
+
 def detect_value_bets(db: Session, model_fn) -> list:
     """
     For each upcoming match with odds, run model, compute edge, flag value bets.
@@ -133,18 +184,17 @@ def detect_value_bets(db: Session, model_fn) -> list:
     for odds_data in raw_odds:
         p1_name = odds_data["player1"]
         p2_name = odds_data["player2"]
+        surface = odds_data.get("surface", "hard")
+        category = odds_data.get("category", "250")
 
-        # Match by last name (API uses "Firstname Lastname")
-        p1_last = p1_name.split()[-1]
-        p2_last = p2_name.split()[-1]
-        p1 = db.query(Player).filter(Player.name.ilike(f"%{p1_last}%")).first()
-        p2 = db.query(Player).filter(Player.name.ilike(f"%{p2_last}%")).first()
+        p1 = _find_player(db, p1_name)
+        p2 = _find_player(db, p2_name)
         if not p1 or not p2:
             logger.debug("Players not found in DB: %s vs %s", p1_name, p2_name)
             continue
 
         try:
-            pred = model_fn(p1.id, p2.id, "hard", "250", db)
+            pred = model_fn(p1.id, p2.id, surface, category, db)
         except Exception as e:
             logger.warning("Prediction failed for %s vs %s: %s", p1_name, p2_name, e)
             continue
@@ -172,8 +222,8 @@ def detect_value_bets(db: Session, model_fn) -> list:
         prediction = Prediction(
             player1_id=p1.id,
             player2_id=p2.id,
-            surface="hard",
-            tournament_category="250",
+            surface=surface,
+            tournament_category=category,
             p1_win_probability=p_model_p1,
             p2_win_probability=p_model_p2,
             value_bet_player=value_bet_player,
