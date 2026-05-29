@@ -3,7 +3,7 @@ import time
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -28,6 +28,11 @@ app.include_router(frontend_router)
 
 
 @app.get("/")
+def root_redirect():
+    return RedirectResponse(url="/app/login", status_code=302)
+
+
+@app.get("/health")
 def health_check(request: Request):
     init_done, init_error, init_step = True, None, "done"
     if hasattr(request.app.state, "get_init_status"):
