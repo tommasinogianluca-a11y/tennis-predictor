@@ -2,7 +2,24 @@
 {% block title %}Value Bets — Scommettitore{% endblock %}
 
 {% block content %}
-<div class="flex items-center gap-3 mb-5">
+<div
+  x-data="{
+    minEdge: 0,
+    surface: 'all',
+    sort: 'edge',
+    get filtered() {
+      let bets = Array.from(document.querySelectorAll('[data-bet]'));
+      bets.forEach(el => {
+        const edge = parseFloat(el.dataset.edge);
+        const surf = el.dataset.surface;
+        const show = edge >= this.minEdge && (this.surface === 'all' || surf === this.surface);
+        el.style.display = show ? '' : 'none';
+      });
+    }
+  }"
+>
+
+<div class="flex items-center gap-3 mb-4">
   <h1 class="text-white font-bold text-lg">💰 Value Bets</h1>
   {% if bets %}
   <span class="bg-purple-600 text-white text-xs rounded-full px-2 py-0.5">{{ bets | length }}</span>
@@ -10,6 +27,49 @@
 </div>
 
 {% if bets %}
+<!-- Filters bar -->
+<div class="flex flex-wrap gap-2 mb-4 max-w-lg">
+
+  <!-- Min edge -->
+  <div class="flex items-center gap-1.5 bg-[#1a1a2e] border border-[#2a2a3e] rounded px-3 py-1.5">
+    <span class="text-gray-500 text-xs">Edge min</span>
+    <select x-model.number="minEdge" @change="filtered"
+      class="bg-transparent text-white text-xs focus:outline-none">
+      <option value="0">Tutti</option>
+      <option value="5">≥ 5%</option>
+      <option value="8">≥ 8%</option>
+      <option value="10">≥ 10%</option>
+      <option value="15">≥ 15%</option>
+    </select>
+  </div>
+
+  <!-- Surface -->
+  <div class="flex items-center gap-1.5 bg-[#1a1a2e] border border-[#2a2a3e] rounded px-3 py-1.5">
+    <span class="text-gray-500 text-xs">Superficie</span>
+    <select x-model="surface" @change="filtered"
+      class="bg-transparent text-white text-xs focus:outline-none">
+      <option value="all">Tutte</option>
+      <option value="clay">🟤 Clay</option>
+      <option value="hard">🔵 Hard</option>
+      <option value="grass">🟢 Grass</option>
+      <option value="indoor">⬜ Indoor</option>
+    </select>
+  </div>
+
+  <!-- Sort -->
+  <div class="flex items-center gap-1.5 bg-[#1a1a2e] border border-[#2a2a3e] rounded px-3 py-1.5">
+    <span class="text-gray-500 text-xs">Ordina</span>
+    <select x-model="sort"
+      class="bg-transparent text-white text-xs focus:outline-none">
+      <option value="edge">Edge ↓</option>
+      <option value="date">Data ↑</option>
+      <option value="prob">Stima ↓</option>
+    </select>
+  </div>
+
+</div>
+
+<!-- Bets list -->
 <div class="flex flex-col gap-3 max-w-lg">
   {% for bet in bets %}
   {% set is_p1 = (bet.value_bet == bet.player1) %}
@@ -17,9 +77,16 @@
   {% set bet_prob = bet.p1_win_prob if is_p1 else bet.p2_win_prob %}
   {% set implied_prob = (1 / bet_odds * 100) if bet_odds else 0 %}
 
-  <div class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] overflow-hidden">
+  <div
+    data-bet
+    data-edge="{{ bet.edge_pct | round(1) }}"
+    data-surface="{{ bet.surface }}"
+    data-date="{{ bet.match_date.isoformat() if bet.match_date else '' }}"
+    data-prob="{{ (bet_prob * 100) | round(0) }}"
+    class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] overflow-hidden"
+  >
 
-    <!-- Top: scommetti su -->
+    <!-- Top: scommetti su + data -->
     <div class="bg-[#2d2d4e] px-4 py-2.5 flex items-center justify-between">
       <div>
         <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Scommetti su</div>
@@ -45,6 +112,7 @@
         <span>{{ bet.player1 }} vs {{ bet.player2 }}</span>
         <span class="text-gray-600">·</span>
         <span class="text-gray-500">Match Winner</span>
+        <span class="ml-auto
           {% if bet.surface == 'clay' %}text-amber-400
           {% elif bet.surface == 'grass' %}text-emerald-400
           {% elif bet.surface == 'hard' %}text-blue-400
@@ -96,4 +164,6 @@
   </a>
 </div>
 {% endif %}
+
+</div>
 {% endblock %}
