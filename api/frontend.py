@@ -224,15 +224,20 @@ def value_bets_page(
     _: None = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
+    from data.odds import kelly_stake
     report = generate_report(db)
     bets = sorted(
         report["value_bets"],
         key=lambda x: x.get("edge_pct") or 0,
         reverse=True,
     )
-    # Attach line-movement data to each bet
+    # Attach line-movement data and Kelly % to each bet
     for bet in bets:
         bet["movement"] = _get_movement(bet, db)
+        edge_frac = (bet.get("edge_pct") or 0) / 100.0
+        is_p1 = (bet.get("value_bet_player") == 1)
+        p_model = bet["p1_win_prob"] if is_p1 else bet["p2_win_prob"]
+        bet["kelly_pct"] = round(kelly_stake(edge_frac, p_model) * 100, 1)
 
     ctx = {
         "active": "value_bets",
@@ -430,14 +435,15 @@ def _run_action(job_id: str, action: str) -> None:
         elif action == "retrain":
             import models.predictor as pred_module
             from data.db import SessionLocal
-            from models.predictor import train_model
-            log("[INFO] Retrain avviato...")
+            from models.predictor import train_all_models
+            log("[INFO] Retrain avviato (tutti i modelli superficie + globale)...")
             db = SessionLocal()
             try:
-                new_model = train_model(db, log_cb=log)
+                trained = train_all_models(db, log_cb=log)
                 with pred_module._model_lock:
-                    pred_module._cached_model = new_model
-                log("[OK] Retrain completato. ✅")
+                    pred_module._cached_models.clear()
+                    pred_module._cached_models.update(trained)
+                log(f"[OK] Retrain completato: {list(trained.keys())}. ✅")
             finally:
                 db.close()
 

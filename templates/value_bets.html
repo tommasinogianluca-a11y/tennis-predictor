@@ -134,6 +134,29 @@
         </div>
       </div>
 
+      <!-- Kelly + bookmaker agreement row -->
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        {% if bet.kelly_pct is defined and bet.kelly_pct > 0 %}
+        <div class="flex items-center gap-1.5 bg-[#0f0f1a] rounded px-3 py-1.5">
+          <span class="text-[10px] text-gray-500 uppercase tracking-wider">Kelly</span>
+          <span class="text-emerald-400 font-bold text-xs">{{ "%.1f"|format(bet.kelly_pct) }}%</span>
+          <span class="text-gray-600 text-[10px]">del bankroll</span>
+        </div>
+        {% endif %}
+        {% if bet.bookmaker_count %}
+        <div class="flex items-center gap-1.5 bg-[#0f0f1a] rounded px-3 py-1.5"
+             title="Numero di bookmaker europei che quotano questa partita">
+          <span class="text-[10px] text-gray-500 uppercase tracking-wider">Bookmaker</span>
+          <span class="font-bold text-xs
+            {% if bet.bookmaker_count >= 5 %}text-emerald-400
+            {% elif bet.bookmaker_count >= 3 %}text-amber-400
+            {% else %}text-gray-400{% endif %}">
+            {{ bet.bookmaker_count }}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+
       <!-- Line movement badge (visible only after ≥2 odds snapshots) -->
       {% if bet.movement %}
       <div class="flex items-center justify-between mb-3 bg-[#0f0f1a] rounded px-3 py-2">

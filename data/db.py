@@ -93,6 +93,7 @@ class Prediction(Base):
     edge_percentage = Column(Float, nullable=True)
     bookmaker_odds_p1 = Column(Float, nullable=True)
     bookmaker_odds_p2 = Column(Float, nullable=True)
+    bookmaker_count = Column(Integer, nullable=True)
     match_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

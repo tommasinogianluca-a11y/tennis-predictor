@@ -50,7 +50,7 @@ def test_recent_form_all_losses():
 _FEATURE_PATCHES = {
     "models.features._get_elo": 1500.0,
     "models.features._get_surface_winrate": 0.6,
-    "models.features._get_h2h": (5, 3),
+    "models.features._get_h2h": 0.6,
     "models.features._get_days_rest": 3,
     "models.features._get_rounds_played": 2,
     "models.features._get_serve_rating": 1.0,

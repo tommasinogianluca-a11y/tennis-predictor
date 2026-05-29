@@ -50,20 +50,28 @@ def _get_surface_winrate(player_id: int, surface: str, as_of: date, db: Session)
     return wins / len(matches)
 
 
-def _get_h2h(p1_id: int, p2_id: int, surface: Optional[str], db: Session) -> tuple:
+def _get_h2h(p1_id: int, p2_id: int, surface: Optional[str], as_of: date, db: Session) -> float:
+    """Recency-weighted H2H win rate for p1. Matches decay 10 % per year."""
     from data.db import Match
     query = db.query(Match).filter(
         ((Match.player1_id == p1_id) & (Match.player2_id == p2_id)) |
-        ((Match.player1_id == p2_id) & (Match.player2_id == p1_id))
+        ((Match.player1_id == p2_id) & (Match.player2_id == p1_id)),
+        Match.date.isnot(None),
+        Match.date < as_of,
     )
     if surface:
         query = query.filter(Match.surface == surface)
     matches = query.all()
     if not matches:
-        return 0, 0
-    total = len(matches)
-    p1_wins = sum(1 for m in matches if m.winner_id == p1_id)
-    return total, p1_wins
+        return 0.5
+    weighted_wins = total_w = 0.0
+    for m in matches:
+        days = (as_of - m.date).days
+        w = 0.9 ** (days / 365.25)   # 10 % per-year decay
+        total_w += w
+        if m.winner_id == p1_id:
+            weighted_wins += w
+    return weighted_wins / total_w if total_w > 0 else 0.5
 
 
 def _get_days_rest(player_id: int, as_of: date, db: Session) -> int:
@@ -303,11 +311,8 @@ def build_feature_vector(
     wr_p1 = _get_surface_winrate(player1_id, surface, as_of, db)
     wr_p2 = _get_surface_winrate(player2_id, surface, as_of, db)
 
-    h2h_total, h2h_p1_wins = _get_h2h(player1_id, player2_id, None, db)
-    h2h_rate = h2h_p1_wins / h2h_total if h2h_total else 0.5
-
-    h2h_surf_total, h2h_surf_p1 = _get_h2h(player1_id, player2_id, surface, db)
-    h2h_surf_rate = h2h_surf_p1 / h2h_surf_total if h2h_surf_total else 0.5
+    h2h_rate = _get_h2h(player1_id, player2_id, None, as_of, db)
+    h2h_surf_rate = _get_h2h(player1_id, player2_id, surface, as_of, db)
 
     rest_p1 = _get_days_rest(player1_id, as_of, db)
     rest_p2 = _get_days_rest(player2_id, as_of, db)

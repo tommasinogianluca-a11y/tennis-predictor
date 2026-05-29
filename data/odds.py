@@ -111,10 +111,15 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
             home = match["home_team"]
             away = match["away_team"]
             home_odds_list, away_odds_list = [], []
+            bookmaker_names: set = set()
             for bookie in match.get("bookmakers", []):
                 for market in bookie.get("markets", []):
                     if market["key"] != "h2h":
                         continue
+                    has_home = any(o["name"] == home for o in market["outcomes"])
+                    has_away = any(o["name"] == away for o in market["outcomes"])
+                    if has_home and has_away:
+                        bookmaker_names.add(bookie.get("key", bookie.get("title", "")))
                     for outcome in market["outcomes"]:
                         if outcome["name"] == home:
                             home_odds_list.append(outcome["price"])
@@ -136,6 +141,7 @@ def _fetch_odds_for_sport(sport_key: str) -> list:
                 "player2": away,
                 "odds_p1": round(sum(home_odds_list) / len(home_odds_list), 3),
                 "odds_p2": round(sum(away_odds_list) / len(away_odds_list), 3),
+                "bookmaker_count": len(bookmaker_names),
                 "surface": surface,
                 "category": category,
                 "match_date": match_dt,
@@ -333,6 +339,7 @@ def detect_value_bets(db: Session, model_fn) -> list:
             edge_percentage=edge * 100 if edge else None,
             bookmaker_odds_p1=odds_data["odds_p1"],
             bookmaker_odds_p2=odds_data["odds_p2"],
+            bookmaker_count=odds_data.get("bookmaker_count"),
         )
         db.add(prediction)
 

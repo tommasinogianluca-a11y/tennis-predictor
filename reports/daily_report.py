@@ -49,6 +49,7 @@ def generate_report(db: Session) -> dict:
             "edge_pct": pred.edge_percentage,
             "odds_p1": pred.bookmaker_odds_p1,
             "odds_p2": pred.bookmaker_odds_p2,
+            "bookmaker_count": pred.bookmaker_count,
             "match_date": pred.match_date,
         })
 

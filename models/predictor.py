@@ -15,9 +15,21 @@ from sqlalchemy.orm import Session
 from models.features import build_feature_vector
 
 logger = logging.getLogger(__name__)
-MODEL_NAME = "tennis_xgb_v2"  # bumped: 18 features (was 12)
-TRAIN_CUTOFF = date(2023, 1, 1)
 
+# ── Model versioning ──────────────────────────────────────────────────────────
+SURFACES = ["clay", "hard", "grass", "indoor"]
+_MODEL_VERSION = "v3"   # v3: surface-specific + temporal weights + H2H decay
+
+TRAIN_CUTOFF = date(2023, 1, 1)
+_MIN_SURFACE_SAMPLES = 500   # below this, skip surface model (use global)
+
+
+def _model_name(surface: str) -> str:
+    """DB key for a surface-specific or global model."""
+    return f"tennis_xgb_{surface}_{_MODEL_VERSION}"
+
+
+# ── Serialisation ─────────────────────────────────────────────────────────────
 
 def _serialize(model) -> str:
     raw = pickle.dumps(model)
@@ -31,37 +43,38 @@ def _deserialize(data: str):
     digest_bytes, _, raw = payload.partition(b":")
     expected = hashlib.sha256(raw).hexdigest().encode()
     if digest_bytes != expected:
-        raise ValueError("Model data integrity check failed — possible corruption or tampering.")
+        raise ValueError("Model data integrity check failed.")
     return pickle.loads(raw)
 
 
-def save_model(model, db: Session) -> None:
+def save_model(model, db: Session, model_name: str = "tennis_xgb_global_v3") -> None:
     from data.db import ModelStore
     data = _serialize(model)
-    record = db.query(ModelStore).filter_by(model_name=MODEL_NAME).first()
+    record = db.query(ModelStore).filter_by(model_name=model_name).first()
     if record:
         record.model_data = data
         record.trained_at = datetime.now(timezone.utc)
     else:
-        db.add(ModelStore(model_name=MODEL_NAME, model_data=data))
+        db.add(ModelStore(model_name=model_name, model_data=data))
     db.commit()
-    logger.info("Model saved to DB.")
+    logger.info("Model '%s' saved to DB.", model_name)
 
 
-def load_model(db: Session) -> Optional[object]:
+def load_model(db: Session, model_name: str = "tennis_xgb_global_v3") -> Optional[object]:
     from data.db import ModelStore
-    record = db.query(ModelStore).filter_by(model_name=MODEL_NAME).first()
+    record = db.query(ModelStore).filter_by(model_name=model_name).first()
     if record:
-        logger.info("Model loaded from DB (trained %s).", record.trained_at)
+        logger.info("Model '%s' loaded (trained %s).", model_name, record.trained_at)
         return _deserialize(record.model_data)
     return None
 
 
+# ── In-memory cache ───────────────────────────────────────────────────────────
+
 def _build_memory_cache(db: Session) -> dict:
-    """Load all data into memory for fast feature building during training.
-    Single batch of DB queries instead of N+1."""
+    """Load all data into memory for fast feature building during training."""
     from collections import defaultdict
-    from data.db import EloRating, Match, MatchStats, SentimentCache
+    from data.db import EloRating, Match, MatchStats, Player, SentimentCache
 
     logger.info("Loading all matches into memory...")
     all_matches = (
@@ -71,7 +84,6 @@ def _build_memory_cache(db: Session) -> dict:
         .all()
     )
 
-    # player_id -> sorted list of (date, match) tuples
     player_matches: dict = defaultdict(list)
     for m in all_matches:
         if m.player1_id:
@@ -89,13 +101,11 @@ def _build_memory_cache(db: Session) -> dict:
     for s in db.query(MatchStats).all():
         stats_map[s.player_id].append(s)
 
-    logger.info("Loading sentiment cache...")
+    logger.info("Loading sentiment + player data...")
     sentiment_map: dict = {}
     for sc in db.query(SentimentCache).all():
         sentiment_map[sc.player_id] = sc.sentiment_score
 
-    logger.info("Loading player data (ranking, dob)...")
-    from data.db import Player
     player_map: dict = {p.id: p for p in db.query(Player).all()}
 
     return {
@@ -108,12 +118,14 @@ def _build_memory_cache(db: Session) -> dict:
     }
 
 
+# ── Fast feature path (no DB queries) ────────────────────────────────────────
+
 def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
                          tournament_category: str, as_of: date,
                          tournament_name: str, cache: dict) -> list:
-    """Build feature vector using in-memory cache — no DB queries. 18 features (v2)."""
+    """18-feature vector using in-memory cache. H2H uses recency decay."""
     from datetime import timedelta
-    from models.features import exponential_weights, recent_form, tournament_prestige
+    from models.features import recent_form, tournament_prestige
 
     _BIG_CATEGORIES = {"Slam", "Masters"}
     TWO_YEARS = timedelta(days=730)
@@ -142,17 +154,24 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         wins = sum(1 for m in ms if m.winner_id == pid)
         return wins / len(ms)
 
-    def get_h2h(with_surface: bool):
+    def get_h2h(with_surface: bool) -> float:
+        """Recency-weighted H2H win rate. 10 % per-year decay."""
         ms = [m for m in player_matches.get(p1_id, [])
-              if m.date < as_of
+              if m.date is not None and m.date < as_of
               and ((m.player1_id == p1_id and m.player2_id == p2_id)
                    or (m.player1_id == p2_id and m.player2_id == p1_id))]
         if with_surface:
             ms = [m for m in ms if m.surface == surface]
         if not ms:
             return 0.5
-        p1_wins = sum(1 for m in ms if m.winner_id == p1_id)
-        return p1_wins / len(ms)
+        weighted_wins = total_w = 0.0
+        for m in ms:
+            days = (as_of - m.date).days
+            w = 0.9 ** (days / 365.25)
+            total_w += w
+            if m.winner_id == p1_id:
+                weighted_wins += w
+        return weighted_wins / total_w if total_w > 0 else 0.5
 
     def get_days_rest(pid: int) -> int:
         ms = get_player_matches_before(pid)
@@ -191,8 +210,6 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
     def get_fatigue(pid: int) -> int:
         return sum(1 for m in get_player_matches_before(pid)
                    if m.date >= cutoff_1m)
-
-    # ── v2 helpers ────────────────────────────────────────────────────────────
 
     def get_ranking(pid: int) -> float:
         p = player_map.get(pid)
@@ -242,7 +259,7 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         return wins / len(ms)
 
     return [
-        # ── v1 (12) ───────────────────────────────────────────────────────────
+        # ── v1-v2 (12+6 = 18 features) ───────────────────────────────────────
         float(get_elo(p1_id) - get_elo(p2_id)),
         float(get_surface_winrate(p1_id) - get_surface_winrate(p2_id)),
         float(get_h2h(with_surface=False)),
@@ -255,9 +272,8 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         float(get_recent_form(p1_id) - get_recent_form(p2_id)),
         float(get_fatigue(p1_id) - get_fatigue(p2_id)),
         float(sentiment_map.get(p1_id, 0.0) - sentiment_map.get(p2_id, 0.0)),
-        # ── v2 (6 new) ────────────────────────────────────────────────────────
-        float(get_ranking(p2_id) - get_ranking(p1_id)),      # positive = p1 better ranked
-        float(get_age_score(p1_id) - get_age_score(p2_id)),  # positive = p1 closer to prime
+        float(get_ranking(p2_id) - get_ranking(p1_id)),
+        float(get_age_score(p1_id) - get_age_score(p2_id)),
         float(get_surface_form(p1_id) - get_surface_form(p2_id)),
         float(get_second_serve(p1_id) - get_second_serve(p2_id)),
         float(get_aggression(p1_id) - get_aggression(p2_id)),
@@ -265,8 +281,30 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
     ]
 
 
-def train_model(db: Session, log_cb=None) -> object:
-    """Train XGBoost model. log_cb(msg) is called with progress lines in real-time."""
+# ── Training ──────────────────────────────────────────────────────────────────
+
+def _xgb_config(n_samples: int) -> dict:
+    """Scale estimators down for smaller datasets to avoid overfitting."""
+    if n_samples >= 30_000:
+        n_est = 150
+    elif n_samples >= 10_000:
+        n_est = 120
+    elif n_samples >= 3_000:
+        n_est = 80
+    else:
+        n_est = 60
+    return dict(
+        n_estimators=n_est, max_depth=4, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8,
+        eval_metric="logloss", n_jobs=1, tree_method="hist",
+    )
+
+
+def train_model(db: Session, surface: str = "global", log_cb=None) -> object:
+    """
+    Train XGBoost model for a specific surface (or 'global' for all surfaces).
+    log_cb(msg) is called in real-time for UI progress.
+    """
     import random as _random
 
     def emit(msg: str) -> None:
@@ -275,28 +313,33 @@ def train_model(db: Session, log_cb=None) -> object:
             try:
                 log_cb(msg)
             except Exception:
-                pass  # never let logging failure abort training
+                pass
 
-    emit("[INFO] Loading data into memory...")
+    label = surface.upper()
+    emit(f"[INFO] [{label}] Loading data into memory...")
     cache = _build_memory_cache(db)
-    all_matches = [m for m in cache["all_matches"]
-                   if m.winner_id is not None]
-    emit(f"[INFO] {len(all_matches)} completed matches found.")
+    all_matches = [m for m in cache["all_matches"] if m.winner_id is not None]
 
-    # Shuffle so StratifiedKFold doesn't see monotone class sequences
+    # Surface-specific models train only on matching surface matches
+    if surface != "global":
+        all_matches = [m for m in all_matches if m.surface == surface]
+
+    emit(f"[INFO] [{label}] {len(all_matches)} completed matches.")
+
     _random.seed(42)
     _random.shuffle(all_matches)
 
-    X_train, y_train, X_test, y_test = [], [], [], []
+    current_year = date.today().year
+    X_train, y_train, W_train = [], [], []
+    X_test, y_test = [], []
     skipped = 0
     total = len(all_matches)
-    emit(f"[INFO] Building feature vectors for {total} matches...")
+
+    emit(f"[INFO] [{label}] Building {total} feature vectors...")
     for i, match in enumerate(all_matches):
         if i % 10000 == 0 and i > 0:
-            emit(f"[INFO] Features {i}/{total}...")
+            emit(f"[INFO] [{label}] Features {i}/{total}...")
         try:
-            # Seeder always stores winner as player1 → all labels would be 1.
-            # Randomly flip 50% of samples to create balanced dataset.
             if _random.random() < 0.5:
                 p1_id, p2_id = match.player1_id, match.player2_id
             else:
@@ -309,43 +352,50 @@ def train_model(db: Session, log_cb=None) -> object:
                 match.date, match.tournament_name or "",
                 cache,
             )
-            label = 1 if match.winner_id == p1_id else 0
+            label_y = 1 if match.winner_id == p1_id else 0
+
+            # Temporal weight: 15 % decay per year — recent matches matter more
+            w = 0.85 ** max(0, current_year - match.date.year)
+
             if match.date < TRAIN_CUTOFF:
                 X_train.append(vec)
-                y_train.append(label)
+                y_train.append(label_y)
+                W_train.append(w)
             else:
                 X_test.append(vec)
-                y_test.append(label)
+                y_test.append(label_y)
         except Exception as exc:
             skipped += 1
             logger.debug("Skipped match %s: %s", getattr(match, 'id', '?'), exc)
 
-    emit(f"[INFO] Dataset: {len(X_train)} train / {len(X_test)} test / {skipped} skipped.")
+    lbl = surface.upper()
+    emit(f"[INFO] [{lbl}] Dataset: {len(X_train)} train / {len(X_test)} test / {skipped} skipped.")
 
-    if len(X_train) < 100:
-        raise RuntimeError(f"Not enough training data: only {len(X_train)} train samples (need ≥100). Run Scrape first.")
+    if len(X_train) < _MIN_SURFACE_SAMPLES:
+        raise RuntimeError(
+            f"[{lbl}] Only {len(X_train)} train samples (need ≥{_MIN_SURFACE_SAMPLES}). "
+            "Run Scrape first or use global model."
+        )
 
     X_tr = np.array(X_train, dtype=float)
     y_tr = np.array(y_train, dtype=int)
+    W_tr = np.array(W_train, dtype=float)
+    W_tr /= W_tr.mean()   # normalise to mean=1 for numerical stability
 
-    # Split 80/20 for fit vs Platt calibration.
-    # cv="prefit" trains only 1 model (vs cv=3 which trains 3) — ~3× less peak RAM.
     from sklearn.model_selection import train_test_split
-    X_fit, X_cal, y_fit, y_cal = train_test_split(
-        X_tr, y_tr, test_size=0.2, random_state=42, stratify=y_tr
+    strat = y_tr if np.bincount(y_tr).min() >= 2 else None
+    X_fit, X_cal, y_fit, y_cal, w_fit, w_cal = train_test_split(
+        X_tr, y_tr, W_tr, test_size=0.2, random_state=42, stratify=strat
     )
-    emit(f"[INFO] Fitting XGBoost on {len(X_fit)} samples (tree_method=hist)...")
-    base = xgb.XGBClassifier(
-        n_estimators=150, max_depth=4, learning_rate=0.05,
-        subsample=0.8, colsample_bytree=0.8,
-        eval_metric="logloss",
-        n_jobs=1,            # serial: no thread-level RAM spike
-        tree_method="hist",  # histogram splits: ~50% less RAM than exact
-    )
-    base.fit(X_fit, y_fit)
-    emit("[INFO] Calibrating probabilities (Platt scaling)...")
+
+    cfg = _xgb_config(len(X_fit))
+    emit(f"[INFO] [{lbl}] XGBoost n_estimators={cfg['n_estimators']} on {len(X_fit)} samples...")
+    base = xgb.XGBClassifier(**cfg)
+    base.fit(X_fit, y_fit, sample_weight=w_fit)
+
+    emit(f"[INFO] [{lbl}] Calibrating (Platt scaling)...")
     model = CalibratedClassifierCV(base, method="sigmoid", cv="prefit")
-    model.fit(X_cal, y_cal)
+    model.fit(X_cal, y_cal, sample_weight=w_cal)
 
     if X_test and len(X_test) >= 10:
         X_te = np.array(X_test, dtype=float)
@@ -353,28 +403,74 @@ def train_model(db: Session, log_cb=None) -> object:
         proba = model.predict_proba(X_te)[:, 1]
         brier = brier_score_loss(y_te, proba)
         ll = log_loss(y_te, proba)
-        emit(f"[INFO] Eval ({len(X_test)} samples) — Brier: {brier:.4f}  LogLoss: {ll:.4f}")
+        emit(f"[INFO] [{lbl}] Eval — Brier: {brier:.4f}  LogLoss: {ll:.4f}")
 
-    emit("[INFO] Saving model to DB...")
-    save_model(model, db)
+    mname = _model_name(surface)
+    emit(f"[INFO] [{lbl}] Saving as '{mname}'...")
+    save_model(model, db, model_name=mname)
     return model
 
 
-_cached_model = None
+def train_all_models(db: Session, log_cb=None) -> dict:
+    """
+    Train global + all surface-specific models in sequence.
+    Returns dict of surface → model for all successfully trained models.
+    """
+    def emit(msg: str) -> None:
+        logger.info(msg)
+        if log_cb:
+            try:
+                log_cb(msg)
+            except Exception:
+                pass
+
+    trained = {}
+
+    # Global first — serves as fallback for any surface
+    emit("[INFO] ===== Training GLOBAL model (1/5) =====")
+    try:
+        trained["global"] = train_model(db, surface="global", log_cb=log_cb)
+    except RuntimeError as e:
+        emit(f"[ERROR] Global model failed: {e}")
+
+    # Surface-specific models
+    for idx, surf in enumerate(SURFACES, start=2):
+        emit(f"[INFO] ===== Training {surf.upper()} model ({idx}/5) =====")
+        try:
+            trained[surf] = train_model(db, surface=surf, log_cb=log_cb)
+        except RuntimeError as e:
+            emit(f"[WARN] {surf}: {e} — will use global fallback.")
+
+    emit(f"[OK] Training complete — {len(trained)} models trained. ✅")
+    return trained
+
+
+# ── Model cache + loading ─────────────────────────────────────────────────────
+
+_cached_models: dict = {}   # surface/key → model object
 _model_lock = threading.Lock()
 
 
-def get_model(db: Session) -> object:
-    global _cached_model
-    if _cached_model is not None:
-        return _cached_model
+def get_model(db: Session, surface: str = "global") -> object:
+    """Return surface-specific model if trained, else global fallback."""
+    surf = surface if surface in SURFACES else "global"
+
+    if surf in _cached_models:
+        return _cached_models[surf]
+
     with _model_lock:
-        if _cached_model is None:
-            _cached_model = load_model(db)
-        if _cached_model is None:
-            logger.info("No model in DB — training now (first run).")
-            _cached_model = train_model(db)
-    return _cached_model
+        if surf not in _cached_models:
+            # Try surface-specific first
+            model = load_model(db, _model_name(surf))
+            if model is None and surf != "global":
+                logger.info("No %s model — falling back to global.", surf)
+                model = load_model(db, _model_name("global"))
+            if model is None:
+                logger.info("No model in DB — training global now.")
+                model = train_model(db, surface="global")
+            _cached_models[surf] = model
+
+    return _cached_models[surf]
 
 
 def predict(
@@ -386,7 +482,7 @@ def predict(
     tournament_name: str = "",
     as_of: Optional[date] = None,
 ) -> dict:
-    model = get_model(db)
+    model = get_model(db, surface)
     as_of = as_of or date.today()
     vec = build_feature_vector(
         player1_id, player2_id, surface, tournament_category,
