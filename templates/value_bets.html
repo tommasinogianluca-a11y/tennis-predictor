@@ -3,51 +3,88 @@
 
 {% block content %}
 <div class="flex items-center gap-3 mb-5">
-  <h1 class="text-white font-bold text-lg">Value Bets</h1>
+  <h1 class="text-white font-bold text-lg">💰 Value Bets</h1>
   {% if bets %}
   <span class="bg-purple-600 text-white text-xs rounded-full px-2 py-0.5">{{ bets | length }}</span>
   {% endif %}
 </div>
 
 {% if bets %}
-<div class="bg-[#1a1a2e] rounded-lg overflow-hidden">
-  <!-- Header -->
-  <div class="grid grid-cols-[2fr_1fr_1fr_1fr] bg-[#2d2d4e] px-4 py-2">
-    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Match</span>
-    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Superficie</span>
-    <span class="text-gray-500 text-[10px] uppercase tracking-wider">p(win)</span>
-    <span class="text-gray-500 text-[10px] uppercase tracking-wider">Edge</span>
-  </div>
-  <!-- Rows -->
+<div class="flex flex-col gap-3 max-w-lg">
   {% for bet in bets %}
-  <div class="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-2.5 border-b border-[#2a2a3e] last:border-b-0 hover:bg-[#2d2d4e]/40 transition-colors">
-    <div>
-      <span class="text-white text-sm">{{ bet.player1 }} vs {{ bet.player2 }}</span>
-      {% if bet.value_bet %}
-      <span class="text-gray-500 text-xs ml-1">· {{ bet.value_bet }}</span>
-      {% endif %}
+  {% set is_p1 = (bet.value_bet == bet.player1) %}
+  {% set bet_odds = bet.odds_p1 if is_p1 else bet.odds_p2 %}
+  {% set bet_prob = bet.p1_win_prob if is_p1 else bet.p2_win_prob %}
+  {% set implied_prob = (1 / bet_odds * 100) if bet_odds else 0 %}
+
+  <div class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] overflow-hidden">
+
+    <!-- Top: scommetti su -->
+    <div class="bg-[#2d2d4e] px-4 py-2.5 flex items-center justify-between">
+      <div>
+        <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Scommetti su</div>
+        <div class="text-white font-bold text-base">{{ bet.value_bet }}</div>
+      </div>
+      <div class="text-right">
+        <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Tipo</div>
+        <div class="text-gray-300 text-sm">Match Winner</div>
+      </div>
     </div>
-    <span class="text-sm
-      {% if bet.surface == 'clay' %}text-amber-400
-      {% elif bet.surface == 'grass' %}text-emerald-400
-      {% elif bet.surface == 'hard' %}text-blue-400
-      {% else %}text-gray-400{% endif %}">
-      {{ bet.surface }}
-    </span>
-    <span class="text-gray-400 text-sm">{{ "%.0f"|format(bet.p1_win_prob * 100) }}%</span>
-    <span class="font-bold text-sm
-      {% if bet.edge_pct >= 10 %}text-emerald-400
-      {% elif bet.edge_pct >= 5 %}text-amber-400
-      {% else %}text-gray-400{% endif %}">
-      +{{ "%.1f"|format(bet.edge_pct) }}%
-    </span>
+
+    <!-- Middle: match info -->
+    <div class="px-4 py-3">
+      <div class="text-gray-400 text-xs mb-2">
+        {{ bet.player1 }} vs {{ bet.player2 }}
+        <span class="ml-1.5
+          {% if bet.surface == 'clay' %}text-amber-400
+          {% elif bet.surface == 'grass' %}text-emerald-400
+          {% elif bet.surface == 'hard' %}text-blue-400
+          {% else %}text-gray-400{% endif %}">
+          · {{ bet.surface }}{% if bet.category %} · {{ bet.category }}{% endif %}
+        </span>
+      </div>
+
+      <!-- Stats grid -->
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="bg-[#0f0f1a] rounded p-2">
+          <div class="text-[10px] text-gray-500 mb-1">Quota</div>
+          <div class="text-white font-bold text-sm">{{ "%.2f"|format(bet_odds) if bet_odds else "—" }}</div>
+        </div>
+        <div class="bg-[#0f0f1a] rounded p-2">
+          <div class="text-[10px] text-gray-500 mb-1">Nostra stima</div>
+          <div class="text-purple-400 font-bold text-sm">{{ "%.0f"|format(bet_prob * 100) }}%</div>
+        </div>
+        <div class="bg-[#0f0f1a] rounded p-2">
+          <div class="text-[10px] text-gray-500 mb-1">Implicita</div>
+          <div class="text-gray-400 text-sm">{{ "%.0f"|format(implied_prob) }}%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom: edge badge -->
+    <div class="px-4 pb-3 flex items-center justify-between">
+      <span class="text-[11px] text-gray-500">Edge rispetto al bookmaker</span>
+      <span class="font-bold text-sm px-2.5 py-0.5 rounded-full
+        {% if bet.edge_pct >= 10 %}bg-emerald-900/50 text-emerald-400
+        {% elif bet.edge_pct >= 5 %}bg-amber-900/50 text-amber-400
+        {% else %}bg-gray-800 text-gray-400{% endif %}">
+        +{{ "%.1f"|format(bet.edge_pct) }}%
+      </span>
+    </div>
+
   </div>
   {% endfor %}
 </div>
+
 {% else %}
-<div class="bg-[#1a1a2e] rounded-lg p-8 text-center">
-  <div class="text-gray-500 text-sm">Nessuna value bet trovata oggi.</div>
-  <div class="text-gray-600 text-xs mt-1">Lo scheduler aggiorna le odds ogni 6 ore.</div>
+<div class="bg-[#1a1a2e] rounded-lg p-8 text-center max-w-lg">
+  <div class="text-2xl mb-3">🔍</div>
+  <div class="text-gray-400 text-sm font-medium">Nessuna value bet trovata.</div>
+  <div class="text-gray-600 text-xs mt-1 mb-4">Le odds vengono aggiornate ogni 6 ore dallo scheduler.</div>
+  <a href="/app/system"
+     class="inline-block bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 rounded transition-colors">
+    Aggiorna manualmente → System
+  </a>
 </div>
 {% endif %}
 {% endblock %}
