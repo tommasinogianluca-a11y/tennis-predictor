@@ -1,14 +1,15 @@
 import logging
-import re
 from typing import Optional
 
-from bs4 import BeautifulSoup
+import requests
 from sqlalchemy.orm import Session
 
+from config import ODDS_API_KEY
 from data.db import Player, Prediction
 
 logger = logging.getLogger(__name__)
-ODDSPORTAL_BASE = "https://www.oddsportal.com/tennis/atp/"
+
+ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/tennis_atp/odds/"
 KELLY_FRACTION = 0.25
 EDGE_THRESHOLD = 0.05
 
@@ -22,14 +23,6 @@ def _normalize_odds(odds_list: list) -> list:
     return [p / total for p in probs]
 
 
-def _parse_decimal_odds(text: str) -> Optional[float]:
-    try:
-        val = float(re.sub(r"[^\d.]", "", text))
-        return val if val > 1.0 else None
-    except (ValueError, TypeError):
-        return None
-
-
 def kelly_stake(edge: float, p_model: float) -> float:
     """Fractional Kelly criterion (25%)."""
     if p_model >= 1.0:
@@ -38,50 +31,67 @@ def kelly_stake(edge: float, p_model: float) -> float:
 
 
 def scrape_upcoming_odds(db: Session) -> list:
-    """Scrape upcoming ATP match odds from oddsportal.com."""
-    from data.scraper import fetch_url
-    url = ODDSPORTAL_BASE
-    html = fetch_url(url, db)
-    if not html:
+    """Fetch upcoming ATP match odds from the-odds-api.com."""
+    if not ODDS_API_KEY:
+        logger.warning("ODDS_API_KEY not set — skipping odds fetch.")
         return []
 
-    soup = BeautifulSoup(html, "lxml")
+    try:
+        resp = requests.get(
+            ODDS_API_URL,
+            params={
+                "apiKey": ODDS_API_KEY,
+                "regions": "eu",
+                "markets": "h2h",
+                "oddsFormat": "decimal",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.error("Odds API request failed: %s", e)
+        return []
+
+    remaining = resp.headers.get("x-requests-remaining", "?")
+    used = resp.headers.get("x-requests-used", "?")
+    logger.info("Odds API: used=%s remaining=%s", used, remaining)
+
+    data = resp.json()
     results = []
 
-    try:
-        for row in soup.select("tr.deactivate, tr[class*='odd'], tr[class*='deactivate']"):
-            cells = row.find_all("td")
-            if len(cells) < 4:
+    for match in data:
+        try:
+            home = match["home_team"]
+            away = match["away_team"]
+
+            # Average h2h odds across bookmakers
+            home_odds_list, away_odds_list = [], []
+            for bookie in match.get("bookmakers", []):
+                for market in bookie.get("markets", []):
+                    if market["key"] != "h2h":
+                        continue
+                    for outcome in market["outcomes"]:
+                        if outcome["name"] == home:
+                            home_odds_list.append(outcome["price"])
+                        elif outcome["name"] == away:
+                            away_odds_list.append(outcome["price"])
+
+            if not home_odds_list or not away_odds_list:
                 continue
-            try:
-                participants = row.select(".name")
-                if len(participants) < 2:
-                    continue
-                p1_name = participants[0].get_text(strip=True)
-                p2_name = participants[1].get_text(strip=True)
 
-                odds_cells = row.select(".odds-nowrp, td.right")
-                odds_values = []
-                for cell in odds_cells[:2]:
-                    o = _parse_decimal_odds(cell.get_text(strip=True))
-                    if o:
-                        odds_values.append(o)
+            odds_p1 = round(sum(home_odds_list) / len(home_odds_list), 3)
+            odds_p2 = round(sum(away_odds_list) / len(away_odds_list), 3)
 
-                if len(odds_values) < 2:
-                    continue
+            results.append({
+                "player1": home,
+                "player2": away,
+                "odds_p1": odds_p1,
+                "odds_p2": odds_p2,
+            })
+        except (KeyError, ZeroDivisionError):
+            continue
 
-                results.append({
-                    "player1": p1_name,
-                    "player2": p2_name,
-                    "odds_p1": odds_values[0],
-                    "odds_p2": odds_values[1],
-                })
-            except Exception:
-                continue
-    except Exception as e:
-        logger.warning("oddsportal parse error: %s", e)
-
-    logger.info("oddsportal: found %d upcoming matches with odds.", len(results))
+    logger.info("Odds API: parsed %d upcoming ATP matches.", len(results))
     return results
 
 
@@ -97,9 +107,13 @@ def detect_value_bets(db: Session, model_fn) -> list:
         p1_name = odds_data["player1"]
         p2_name = odds_data["player2"]
 
-        p1 = db.query(Player).filter(Player.name.ilike(f"%{p1_name.split()[-1]}%")).first()
-        p2 = db.query(Player).filter(Player.name.ilike(f"%{p2_name.split()[-1]}%")).first()
+        # Match by last name (API uses "Firstname Lastname")
+        p1_last = p1_name.split()[-1]
+        p2_last = p2_name.split()[-1]
+        p1 = db.query(Player).filter(Player.name.ilike(f"%{p1_last}%")).first()
+        p2 = db.query(Player).filter(Player.name.ilike(f"%{p2_last}%")).first()
         if not p1 or not p2:
+            logger.debug("Players not found in DB: %s vs %s", p1_name, p2_name)
             continue
 
         try:
@@ -119,7 +133,7 @@ def detect_value_bets(db: Session, model_fn) -> list:
         edge_p1 = p_model_p1 - p_bookie_p1
         edge_p2 = p_model_p2 - p_bookie_p2
 
-        value_bet_player = None
+        value_bet_player: Optional[int] = None
         edge = 0.0
         if edge_p1 > EDGE_THRESHOLD:
             value_bet_player = 1
