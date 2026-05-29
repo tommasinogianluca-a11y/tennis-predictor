@@ -186,7 +186,7 @@ def _find_player(db: Session, full_name: str) -> Optional[object]:
             if matched:
                 return matched[0]  # best guess among initial matches
 
-    logger.debug("No confident match for '%s'", full_name)
+    logger.info("Player not matched in DB: '%s'", full_name)
     return None
 
 
@@ -207,7 +207,8 @@ def detect_value_bets(db: Session, model_fn) -> list:
         p1 = _find_player(db, p1_name)
         p2 = _find_player(db, p2_name)
         if not p1 or not p2:
-            logger.debug("Players not found in DB: %s vs %s", p1_name, p2_name)
+            logger.info("Skipping match (player not found): %s vs %s [p1=%s p2=%s]",
+                        p1_name, p2_name, bool(p1), bool(p2))
             continue
 
         try:
