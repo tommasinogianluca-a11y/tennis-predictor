@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from typing import Optional
 
 import requests
@@ -153,41 +154,93 @@ def scrape_upcoming_odds(db: Session) -> list:
     return results
 
 
-def _find_player(db: Session, full_name: str) -> Optional[object]:
-    """Find a player by full name. Only matches active/ranked players to avoid retired ghosts."""
+def _normalize(s: str) -> str:
+    """Lowercase, remove accents, collapse spaces."""
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.lower().strip()
+
+
+def _name_variants(full_name: str) -> list[str]:
+    """
+    Generate candidate search strings for a player name.
+    API format: "Alex de Minaur", "Thiago Agustin Tirante"
+    DB may store: "De Minaur A.", "Minaur A.", "A. De Minaur", etc.
+    """
     parts = full_name.strip().split()
     if not parts:
-        return None
+        return []
 
-    # Base queryset: prefer players with a current ranking (active)
-    active_q = db.query(Player).filter(Player.current_ranking.isnot(None))
-    all_q = db.query(Player)
+    first = parts[0]
+    last = parts[-1]
+    initial = first[0]
 
-    for q in (active_q, all_q):  # try active players first, fall back to full DB
-        # 1. Exact full name
-        p = q.filter(Player.name.ilike(full_name)).first()
-        if p:
-            return p
+    variants = [
+        full_name,            # Alex de Minaur
+        f"{last} {first}",    # Minaur Alex
+        f"{last} {initial}.", # Minaur A.
+        f"{initial}. {last}", # A. Minaur
+        last,                 # Minaur (last only)
+    ]
+    # For compound last names (de/van/del/da/dos/von): also try without particle
+    particles = {"de", "van", "del", "da", "dos", "von", "le", "la"}
+    non_particle = [p for p in parts[1:] if p.lower() not in particles]
+    if non_particle and non_particle[-1] != last:
+        real_last = non_particle[-1]
+        variants += [
+            f"{real_last} {initial}.",
+            f"{initial}. {real_last}",
+            real_last,
+        ]
+    return variants
 
-        # 2. Exact last name only (whole word match avoids substring ghosts)
-        last = parts[-1]
-        candidates = q.filter(Player.name.ilike(f"% {last}")).all()  # space before last name
-        if not candidates:
-            candidates = q.filter(Player.name.ilike(f"{last}%")).all()  # last name first (e.g. "Sinner J.")
-        if len(candidates) == 1:
-            return candidates[0]
 
-        # 3. Last name + first initial — must match both
-        if len(candidates) > 1 and len(parts) >= 2:
-            first_initial = parts[0][0].lower()
-            matched = [c for c in candidates if first_initial in c.name.lower()[:4]]
-            if len(matched) == 1:
-                return matched[0]
-            if matched:
-                return matched[0]  # best guess among initial matches
+def _find_player(db: Session, full_name: str) -> Optional[object]:
+    """
+    Find player by full name with normalization and multi-format fallback.
+    If not found at all, auto-create a minimal record so predictions still work.
+    """
+    norm_target = _normalize(full_name)
 
-    logger.info("Player not matched in DB: '%s'", full_name)
-    return None
+    # Prefer active (ranked) players; fall back to full DB
+    for ranked_only in (True, False):
+        base = db.query(Player)
+        if ranked_only:
+            base = base.filter(Player.current_ranking.isnot(None))
+
+        for variant in _name_variants(full_name):
+            # Try exact ilike
+            p = base.filter(Player.name.ilike(variant)).first()
+            if p:
+                logger.debug("Matched '%s' → '%s' (variant '%s')", full_name, p.name, variant)
+                return p
+
+        # Normalized full-scan: load top 500 ranked players and compare normalized names
+        limit = 500 if ranked_only else 3000
+        candidates = base.order_by(
+            Player.current_ranking.asc().nulls_last()
+        ).limit(limit).all()
+        for c in candidates:
+            if _normalize(c.name) == norm_target:
+                logger.debug("Matched '%s' → '%s' (normalized)", full_name, c.name)
+                return c
+        # Partial normalized last-name match among top candidates
+        last_norm = _normalize(full_name.split()[-1])
+        first_initial = full_name[0].lower()
+        name_matches = [
+            c for c in candidates
+            if last_norm in _normalize(c.name) and _normalize(c.name).startswith(first_initial)
+        ]
+        if len(name_matches) == 1:
+            logger.debug("Matched '%s' → '%s' (partial norm)", full_name, name_matches[0].name)
+            return name_matches[0]
+
+    # Not found anywhere — auto-create so predictions still work (ELO defaults to 1500)
+    logger.info("Auto-creating player record for '%s' (not in DB)", full_name)
+    new_player = Player(name=full_name, current_ranking=None, nationality=None)
+    db.add(new_player)
+    db.flush()  # get ID without full commit
+    return new_player
 
 
 def detect_value_bets(db: Session, model_fn) -> list:
@@ -207,8 +260,7 @@ def detect_value_bets(db: Session, model_fn) -> list:
         p1 = _find_player(db, p1_name)
         p2 = _find_player(db, p2_name)
         if not p1 or not p2:
-            logger.info("Skipping match (player not found): %s vs %s [p1=%s p2=%s]",
-                        p1_name, p2_name, bool(p1), bool(p2))
+            logger.warning("Could not resolve players: %s vs %s", p1_name, p2_name)
             continue
 
         try:
