@@ -154,23 +154,40 @@ def scrape_upcoming_odds(db: Session) -> list:
 
 
 def _find_player(db: Session, full_name: str) -> Optional[object]:
-    """Find a player by full name using progressively looser matching."""
-    # 1. Exact match
-    p = db.query(Player).filter(Player.name.ilike(full_name)).first()
-    if p:
-        return p
-    # 2. Last name match
-    last = full_name.split()[-1]
-    candidates = db.query(Player).filter(Player.name.ilike(f"%{last}%")).all()
-    if len(candidates) == 1:
-        return candidates[0]
-    # 3. Among last-name candidates, check first name initial
-    if len(candidates) > 1 and len(full_name.split()) >= 2:
-        first_initial = full_name.split()[0][0].lower()
-        for c in candidates:
-            if c.name.lower().startswith(first_initial):
-                return c
-    return candidates[0] if candidates else None
+    """Find a player by full name. Only matches active/ranked players to avoid retired ghosts."""
+    parts = full_name.strip().split()
+    if not parts:
+        return None
+
+    # Base queryset: prefer players with a current ranking (active)
+    active_q = db.query(Player).filter(Player.current_ranking.isnot(None))
+    all_q = db.query(Player)
+
+    for q in (active_q, all_q):  # try active players first, fall back to full DB
+        # 1. Exact full name
+        p = q.filter(Player.name.ilike(full_name)).first()
+        if p:
+            return p
+
+        # 2. Exact last name only (whole word match avoids substring ghosts)
+        last = parts[-1]
+        candidates = q.filter(Player.name.ilike(f"% {last}")).all()  # space before last name
+        if not candidates:
+            candidates = q.filter(Player.name.ilike(f"{last}%")).all()  # last name first (e.g. "Sinner J.")
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # 3. Last name + first initial — must match both
+        if len(candidates) > 1 and len(parts) >= 2:
+            first_initial = parts[0][0].lower()
+            matched = [c for c in candidates if first_initial in c.name.lower()[:4]]
+            if len(matched) == 1:
+                return matched[0]
+            if matched:
+                return matched[0]  # best guess among initial matches
+
+    logger.debug("No confident match for '%s'", full_name)
+    return None
 
 
 def detect_value_bets(db: Session, model_fn) -> list:
