@@ -556,6 +556,78 @@ def system_job_status(
     )
 
 
+@router.get("/system/debug-odds", response_class=HTMLResponse)
+def debug_odds(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Synchronous odds pipeline diagnostic — returns plaintext report."""
+    import traceback as _tb
+    lines = ["<pre style='font-family:monospace;font-size:12px;color:#ccc'>"]
+
+    def out(msg: str):
+        lines.append(_html.escape(str(msg)))
+
+    try:
+        from config import ODDS_API_KEY
+        out(f"ODDS_API_KEY set: {bool(ODDS_API_KEY)}")
+
+        from data.odds import _active_atp_sport_keys, _fetch_odds_for_sport
+        out("\n[1] Fetching active ATP sport keys...")
+        keys = _active_atp_sport_keys()
+        out(f"    Keys: {keys}")
+
+        if not keys:
+            out("    ✗ No active ATP events — nothing to do.")
+        else:
+            from data.odds import _surface_category_for_key
+            all_matches = []
+            for k in keys:
+                out(f"\n[2] Fetching odds for {k}...")
+                matches = _fetch_odds_for_sport(k)
+                out(f"    Got {len(matches)} matches.")
+                all_matches.extend(matches)
+
+            from data.odds import _find_player, _normalize_odds, EDGE_THRESHOLD
+            from models.predictor import predict as _predict
+
+            pred_ok = pred_fail = val_bets = 0
+            for m in all_matches:
+                p1 = _find_player(db, m["player1"])
+                p2 = _find_player(db, m["player2"])
+                if not p1 or not p2:
+                    out(f"    ✗ Player not found: {m['player1']} / {m['player2']}")
+                    continue
+                try:
+                    pred = _predict(p1.id, p2.id, m["surface"], m["category"], db)
+                    norm = _normalize_odds([m["odds_p1"], m["odds_p2"]])
+                    e1 = pred["p1_win_prob"] - norm[0]
+                    e2 = pred["p2_win_prob"] - norm[1]
+                    edge = max(e1, e2)
+                    vb = "✅ VALUE" if edge > EDGE_THRESHOLD else ""
+                    if edge > EDGE_THRESHOLD:
+                        val_bets += 1
+                    out(f"    {m['player1']} vs {m['player2']} "
+                        f"| p1={pred['p1_win_prob']:.2f} p2={pred['p2_win_prob']:.2f} "
+                        f"| bk={norm[0]:.2f}/{norm[1]:.2f} "
+                        f"| edge={edge:+.3f} {vb}")
+                    pred_ok += 1
+                except Exception as e:
+                    out(f"    ✗ Predict failed: {m['player1']} vs {m['player2']}: {e}")
+                    pred_fail += 1
+
+            out(f"\n[3] Summary: {pred_ok} OK, {pred_fail} failed, {val_bets} value bets")
+            out(f"    Edge threshold: {EDGE_THRESHOLD:.0%}")
+
+    except Exception as e:
+        out(f"\n[FATAL] {e}")
+        out(_tb.format_exc())
+
+    lines.append("</pre>")
+    return HTMLResponse("".join(lines))
+
+
 @router.get("/system/stats", response_class=HTMLResponse)
 def system_stats(
     request: Request,
