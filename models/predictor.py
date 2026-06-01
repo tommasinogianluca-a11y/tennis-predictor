@@ -382,9 +382,9 @@ def train_model(db: Session, surface: str = "global", log_cb=None, _cache=None) 
             "Run Scrape first or use global model."
         )
 
-    X_tr = np.array(X_train, dtype=float)
+    X_tr = np.array(X_train, dtype=np.float32)
     y_tr = np.array(y_train, dtype=int)
-    W_tr = np.array(W_train, dtype=float)
+    W_tr = np.array(W_train, dtype=np.float32)
     W_tr /= W_tr.mean()   # normalise to mean=1 for numerical stability
 
     from sklearn.model_selection import train_test_split
@@ -403,7 +403,7 @@ def train_model(db: Session, surface: str = "global", log_cb=None, _cache=None) 
     model.fit(X_cal, y_cal, sample_weight=w_cal)
 
     if X_test and len(X_test) >= 10:
-        X_te = np.array(X_test, dtype=float)
+        X_te = np.array(X_test, dtype=np.float32)
         y_te = np.array(y_test, dtype=int)
         proba = model.predict_proba(X_te)[:, 1]
         brier = brier_score_loss(y_te, proba)
@@ -501,7 +501,7 @@ def predict(
         player1_id, player2_id, surface, tournament_category,
         as_of, db, tournament_name,
     )
-    X = np.array([vec], dtype=float)
+    X = np.array([vec], dtype=np.float32)
     proba = model.predict_proba(X)[0]
     return {
         "p1_win_prob": float(proba[1]),

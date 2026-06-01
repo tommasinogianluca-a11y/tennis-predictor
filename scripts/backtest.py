@@ -255,7 +255,7 @@ def run_backtest(
                 m.date, m.tournament_name or "",
                 cache,
             )
-            proba = model.predict_proba([fv])[0]
+            proba = model.predict_proba(np.array([fv], dtype=np.float32))[0]
             p1_win = float(proba[1])
         except Exception:
             skipped += 1
