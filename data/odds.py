@@ -288,6 +288,8 @@ def detect_value_bets(db: Session, model_fn) -> list:
     )
 
     value_bets = []
+    pred_ok = pred_fail = 0
+    edges: list = []
 
     for odds_data in raw_odds:
         p1_name = odds_data["player1"]
@@ -303,8 +305,10 @@ def detect_value_bets(db: Session, model_fn) -> list:
 
         try:
             pred = model_fn(p1.id, p2.id, surface, category, db)
+            pred_ok += 1
         except Exception as e:
             logger.warning("Prediction failed for %s vs %s: %s", p1_name, p2_name, e)
+            pred_fail += 1
             continue
 
         p_model_p1 = pred["p1_win_prob"]
@@ -317,6 +321,7 @@ def detect_value_bets(db: Session, model_fn) -> list:
 
         edge_p1 = p_model_p1 - p_bookie_p1
         edge_p2 = p_model_p2 - p_bookie_p2
+        edges.append(max(edge_p1, edge_p2))
 
         value_bet_player: Optional[int] = None
         edge = 0.0
@@ -373,5 +378,10 @@ def detect_value_bets(db: Session, model_fn) -> list:
             })
 
     db.commit()
-    logger.info("Value bets found: %d", len(value_bets))
+    avg_edge = sum(edges) / len(edges) if edges else 0
+    logger.info(
+        "Odds refresh done: %d matches, %d predictions OK, %d failed, "
+        "avg_max_edge=%.3f, threshold=%.2f, value_bets=%d",
+        len(raw_odds), pred_ok, pred_fail, avg_edge, EDGE_THRESHOLD, len(value_bets),
+    )
     return value_bets
