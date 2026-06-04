@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Overview — Scommettitore{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-start mb-5">
+  <div>
+    <h1 class="text-white font-bold text-lg">Overview</h1>
+    <p class="text-gray-600 text-xs">{{ report.date }}</p>
+  </div>
+  <div class="bg-[#1a1a2e] rounded px-2 py-1 text-xs
+              {% if init_done %}text-emerald-400{% else %}text-amber-400{% endif %}">
+    {% if init_done %}● Sistema online{% elif init_error %}● Errore init{% else %}⏳ {{ init_step }}{% endif %}
+  </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="grid grid-cols-2 gap-3 mb-4">
+  <div class="bg-[#1a1a2e] rounded-lg p-4">
+    <div class="text-purple-400 text-2xl font-bold">{{ report.value_bets_count }}</div>
+    <div class="text-gray-500 text-xs mt-1">Value Bets oggi</div>
+  </div>
+  <div class="bg-[#1a1a2e] rounded-lg p-4">
+    {% if report.value_bets %}
+      {% set avg_edge = (report.value_bets | map(attribute='edge_pct') | select | list | sum) / (report.value_bets | length) %}
+      <div class="text-emerald-400 text-2xl font-bold">+{{ "%.1f"|format(avg_edge) }}%</div>
+    {% else %}
+      <div class="text-gray-500 text-2xl font-bold">—</div>
+    {% endif %}
+    <div class="text-gray-500 text-xs mt-1">Edge medio</div>
+  </div>
+</div>
+
+<!-- Top Value Bet -->
+{% if top_bet %}
+<div class="bg-[#1a1a2e] rounded-lg p-4 mb-4 border-l-4 border-emerald-500">
+  <div class="text-emerald-400 text-xs font-bold mb-1.5">🏆 TOP VALUE BET</div>
+  <div class="text-white text-sm mb-1">
+    {{ top_bet.player1 }} vs {{ top_bet.player2 }}
+    <span class="text-gray-500">· {{ top_bet.surface }} · {{ top_bet.category }}</span>
+  </div>
+  <div class="flex gap-4 text-xs">
+    <span class="text-amber-400">Edge +{{ "%.1f"|format(top_bet.edge_pct) }}%</span>
+    <span class="text-gray-400">p({{ top_bet.value_bet }}) {{ "%.0f"|format(top_bet.p1_win_prob * 100) }}%</span>
+  </div>
+</div>
+{% else %}
+<div class="bg-[#1a1a2e] rounded-lg p-4 mb-4 border-l-4 border-gray-700">
+  <div class="text-gray-500 text-sm">Nessuna value bet oggi</div>
+</div>
+{% endif %}
+
+<!-- System Status -->
+<div class="bg-[#1a1a2e] rounded-lg p-4">
+  <div class="text-gray-500 text-[10px] uppercase tracking-widest mb-3">Stato Sistema</div>
+  <div class="grid grid-cols-2 gap-y-2">
+    <div class="flex justify-between pr-4">
+      <span class="text-gray-400 text-xs">Model</span>
+      <span class="text-xs {% if init_done %}text-emerald-400{% else %}text-amber-400{% endif %}">
+        {% if init_done %}✅ loaded{% else %}⏳ {{ init_step }}{% endif %}
+      </span>
+    </div>
+    <div class="flex justify-between">
+      <span class="text-gray-400 text-xs">DB</span>
+      <span class="text-emerald-400 text-xs">✅ ok</span>
+    </div>
+    {% if init_error %}
+    <div class="col-span-2 mt-2">
+      <details class="text-red-400 text-xs">
+        <summary class="cursor-pointer">⚠️ Init error (click to expand)</summary>
+        <pre class="mt-1 text-[10px] text-red-300 overflow-x-auto">{{ init_error }}</pre>
+      </details>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

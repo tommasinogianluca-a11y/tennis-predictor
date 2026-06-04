@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login — Scommettitore</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#0f0f1a] flex items-center justify-center">
+  <div class="bg-[#1a1a2e] rounded-lg p-8 w-80 border border-[#2a2a3e]">
+    <div class="text-purple-500 font-bold text-lg mb-6 text-center">🎾 Scommettitore</div>
+
+    {% if error %}
+    <div class="bg-red-900/30 border border-red-700 text-red-400 text-sm rounded p-2 mb-4">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/app/login">
+      <label class="block text-gray-400 text-sm mb-1">Password</label>
+      <input
+        type="password"
+        name="password"
+        autofocus
+        class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-purple-600"
+        placeholder="Enter password"
+      >
+      <button
+        type="submit"
+        class="w-full bg-purple-600 hover:bg-purple-700 text-white rounded py-2 text-sm font-medium transition-colors"
+      >
+        Sign In
+      </button>
+    </form>
+  </div>
+</body>
+</html>

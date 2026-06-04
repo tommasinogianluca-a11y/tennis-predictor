@@ -1,0 +1,17 @@
+{% if players %}
+<ul class="absolute z-10 w-full bg-[#1a1a2e] border border-[#2a2a3e] rounded mt-1 shadow-lg max-h-48 overflow-y-auto">
+  {% for p in players %}
+  <li
+    class="px-3 py-2 text-sm text-white hover:bg-[#2d2d4e] cursor-pointer flex justify-between items-center"
+    @click="selectPlayer($el.dataset.id, $el.dataset.name)"
+    data-id="{{ p.id }}"
+    data-name="{{ p.name | e }}"
+  >
+    <span>{{ p.name }}</span>
+    {% if p.current_ranking %}
+    <span class="text-gray-500 text-xs">#{{ p.current_ranking }}</span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Players — Scommettitore{% endblock %}
+
+{% block content %}
+<h1 class="text-white font-bold text-lg mb-5">👤 Players</h1>
+
+<div class="bg-[#1a1a2e] rounded-lg p-4 mb-4 max-w-xl">
+  <input
+    type="text"
+    name="q"
+    placeholder="Cerca giocatore (es. Sinner, Djokovic...)"
+    hx-get="/app/players/search"
+    hx-target="#player-results"
+    hx-trigger="keyup changed delay:300ms"
+    hx-swap="innerHTML"
+    class="w-full bg-[#0f0f1a] border border-[#2a2a3e] rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-600"
+  >
+</div>
+
+<div id="player-results" class="max-w-xl">
+  <p class="text-gray-600 text-sm">Digita almeno 2 caratteri per cercare.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Notizie — Scommettitore{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-5">
+  <h1 class="text-white font-bold text-lg">📰 Notizie & Sentiment</h1>
+  {% if total %}
+  <span class="bg-[#2d2d4e] text-gray-400 text-xs rounded-full px-2 py-0.5">{{ total }} articoli</span>
+  {% endif %}
+</div>
+
+{% if not player_groups and not ungrouped %}
+<div class="bg-[#1a1a2e] rounded-lg p-8 text-center max-w-lg">
+  <div class="text-2xl mb-3">📭</div>
+  <div class="text-gray-400 text-sm">Nessuna notizia disponibile.</div>
+  <div class="text-gray-600 text-xs mt-1 mb-4">Le notizie vengono aggiornate ogni 4 ore dallo scheduler.</div>
+  <a href="/app/system"
+     class="inline-block bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 rounded transition-colors">
+    Aggiorna manualmente → System
+  </a>
+</div>
+{% else %}
+
+{% for group in player_groups %}
+<div class="mb-6 max-w-2xl">
+
+  <!-- Player header con sentiment -->
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-white font-semibold text-sm">{{ group.player_name }}</h2>
+    {% if group.sentiment %}
+    {% set score = group.sentiment.sentiment_score %}
+    <div class="flex items-center gap-2">
+      {% if group.sentiment.reasoning %}
+      <span class="text-gray-500 text-xs italic truncate max-w-[200px]" title="{{ group.sentiment.reasoning }}">
+        {{ group.sentiment.reasoning[:60] }}{% if group.sentiment.reasoning|length > 60 %}…{% endif %}
+      </span>
+      {% endif %}
+      <span class="text-xs font-bold px-2 py-0.5 rounded-full
+        {% if score >= 0.3 %}bg-emerald-900/50 text-emerald-400
+        {% elif score <= -0.3 %}bg-red-900/50 text-red-400
+        {% else %}bg-gray-800 text-gray-400{% endif %}">
+        {% if score >= 0.3 %}😊 Positivo
+        {% elif score <= -0.3 %}😟 Negativo
+        {% else %}😐 Neutro{% endif %}
+        ({{ "%.2f"|format(score) }})
+      </span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Articles -->
+  <div class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] divide-y divide-[#2a2a3e]">
+    {% for article in group.articles %}
+    <div class="px-4 py-3 flex items-start justify-between gap-3">
+      <div class="flex-1 min-w-0">
+        {% if article.source_url %}
+        <a href="{{ article.source_url }}" target="_blank" rel="noopener noreferrer"
+           class="text-sm text-white hover:text-purple-400 transition-colors leading-snug block">
+          {{ article.headline }}
+          <svg class="inline w-2.5 h-2.5 ml-1 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+        </a>
+        {% else %}
+        <span class="text-sm text-white leading-snug block">{{ article.headline }}</span>
+        {% endif %}
+        {% if article.published_at %}
+        <span class="text-[11px] text-gray-600 mt-0.5 block">
+          {{ article.published_at.strftime("%d %b %Y %H:%M") }}
+        </span>
+        {% endif %}
+      </div>
+      {% if article.sentiment_score is not none %}
+      <span class="text-xs font-mono shrink-0 mt-0.5
+        {% if article.sentiment_score >= 0.3 %}text-emerald-400
+        {% elif article.sentiment_score <= -0.3 %}text-red-400
+        {% else %}text-gray-500{% endif %}">
+        {{ "%+.2f"|format(article.sentiment_score) }}
+      </span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+{% endfor %}
+
+{% if ungrouped %}
+<div class="mb-6 max-w-2xl">
+  <h2 class="text-gray-500 font-semibold text-sm mb-2">Notizie generali</h2>
+  <div class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] divide-y divide-[#2a2a3e]">
+    {% for article in ungrouped %}
+    <div class="px-4 py-3">
+      {% if article.source_url %}
+      <a href="{{ article.source_url }}" target="_blank" rel="noopener noreferrer"
+         class="text-sm text-white hover:text-purple-400 transition-colors">
+        {{ article.headline }}
+      </a>
+      {% else %}
+      <span class="text-sm text-white">{{ article.headline }}</span>
+      {% endif %}
+      {% if article.published_at %}
+      <span class="text-[11px] text-gray-600 ml-2">{{ article.published_at.strftime("%d %b") }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

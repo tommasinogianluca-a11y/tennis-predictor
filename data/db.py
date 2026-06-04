@@ -93,6 +93,8 @@ class Prediction(Base):
     edge_percentage = Column(Float, nullable=True)
     bookmaker_odds_p1 = Column(Float, nullable=True)
     bookmaker_odds_p2 = Column(Float, nullable=True)
+    bookmaker_count = Column(Integer, nullable=True)
+    match_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -122,8 +124,32 @@ class SentimentCache(Base):
     cached_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class SystemJob(Base):
+    __tablename__ = "system_jobs"
+    id = Column(String(8), primary_key=True)
+    action = Column(String(50))
+    status = Column(String(20), default="running")   # running / done / failed
+    log = Column(Text, default="")                   # newline-separated log lines
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime, nullable=True)
+
+
+class OddsSnapshot(Base):
+    """Time-series of bookmaker odds per match — enables line movement tracking."""
+    __tablename__ = "odds_snapshots"
+    id = Column(Integer, primary_key=True)
+    # Normalised key: player_a_id < player_b_id always (order-independent match identity)
+    player_a_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    player_b_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    match_date = Column(Date, nullable=True)
+    odds_a = Column(Float, nullable=False)   # odds for player with lower id
+    odds_b = Column(Float, nullable=False)   # odds for player with higher id
+    recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 Index("ix_match_date", Match.__table__.c.date)
 Index("ix_matchstats_match_player", MatchStats.__table__.c.match_id, MatchStats.__table__.c.player_id)
+Index("ix_odds_snap_key", OddsSnapshot.__table__.c.player_a_id, OddsSnapshot.__table__.c.player_b_id, OddsSnapshot.__table__.c.match_date)
 
 
 def get_db() -> Generator[Session, None, None]:

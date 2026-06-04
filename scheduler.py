@@ -61,13 +61,16 @@ def _refresh_odds():
 def _weekly_retrain():
     import models.predictor as pred_module
     from data.db import SessionLocal
-    from models.predictor import train_model
+    from models.predictor import train_all_models
     db = SessionLocal()
     try:
-        new_model = train_model(db)
+        trained = train_all_models(db)
         with pred_module._model_lock:
-            pred_module._cached_model = new_model
-        logger.info("Weekly retrain complete.")
+            pred_module._cached_models.clear()
+            pred_module._cached_models.update(trained)
+        logger.info("Weekly retrain complete: %s", list(trained.keys()))
+    except Exception as exc:
+        logger.error("Weekly retrain failed: %s", exc)
     finally:
         db.close()
 

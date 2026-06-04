@@ -21,3 +21,11 @@ if not API_SECRET_KEY:
     raise RuntimeError("API_SECRET_KEY environment variable is required. Set it in .env or Railway variables.")
 
 PORT = int(os.getenv("PORT", 8000))
+
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+if not DASHBOARD_PASSWORD:
+    logger.warning("DASHBOARD_PASSWORD not set — dashboard login disabled (any password accepted).")
+
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+if not ODDS_API_KEY:
+    logger.warning("ODDS_API_KEY not set — odds refresh will be skipped.")

@@ -19,15 +19,25 @@ def generate_report(db: Session) -> dict:
         .all()
     )
 
+    player_ids = set()
+    for pred in predictions:
+        player_ids.add(pred.player1_id)
+        player_ids.add(pred.player2_id)
+    players = {
+        p.id: p.name
+        for p in db.query(Player).filter(Player.id.in_(player_ids)).all()
+    }
+
     def _name(pid: int) -> str:
-        p = db.query(Player).filter_by(id=pid).first()
-        return p.name if p else str(pid)
+        return players.get(pid, str(pid))
 
     entries = []
     for pred in predictions:
         entries.append({
             "player1": _name(pred.player1_id),
             "player2": _name(pred.player2_id),
+            "p1_id": pred.player1_id,
+            "p2_id": pred.player2_id,
             "surface": pred.surface,
             "category": pred.tournament_category,
             "p1_win_prob": round(pred.p1_win_probability, 3),
@@ -35,9 +45,12 @@ def generate_report(db: Session) -> dict:
             "value_bet": _name(
                 pred.player1_id if pred.value_bet_player == 1 else pred.player2_id
             ) if pred.value_bet_player else None,
+            "value_bet_player": pred.value_bet_player,   # 1, 2, or None
             "edge_pct": pred.edge_percentage,
             "odds_p1": pred.bookmaker_odds_p1,
             "odds_p2": pred.bookmaker_odds_p2,
+            "bookmaker_count": pred.bookmaker_count,
+            "match_date": pred.match_date,
         })
 
     value_bets = [e for e in entries if e["value_bet"]]

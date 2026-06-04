@@ -1,0 +1,37 @@
+<div
+  id="job-{{ job_id }}"
+  {% if job.status == "running" %}
+    hx-get="/app/system/job/{{ job_id }}"
+    hx-trigger="every 2s"
+    hx-swap="outerHTML"
+    hx-target="#job-{{ job_id }}"
+  {% endif %}
+  class="bg-[#0a0a0f] rounded-lg p-3 terminal mt-3"
+>
+  <div class="flex items-center gap-2 mb-2">
+    {% if job.status == "running" %}
+      <span class="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
+      <span class="text-amber-400 text-xs font-medium">Running...</span>
+    {% elif job.status == "done" %}
+      <span class="text-emerald-400 text-xs font-medium">✅ Done</span>
+    {% else %}
+      <span class="text-red-400 text-xs font-medium">❌ Failed</span>
+    {% endif %}
+    <span class="text-gray-600 text-[10px] ml-auto">{{ job.started_at }}</span>
+  </div>
+
+  <div class="max-h-48 overflow-y-auto space-y-0.5">
+    {% for line in job.log %}
+    <div class="text-[11px]
+      {% if '[ERROR]' in line %}text-red-400
+      {% elif '[OK]' in line or '✅' in line %}text-emerald-400
+      {% elif '[WARN]' in line %}text-amber-400
+      {% else %}text-gray-400{% endif %}">
+      {{ line }}
+    </div>
+    {% endfor %}
+    {% if not job.log %}
+    <div class="text-gray-600 text-[11px]">Waiting for output...</div>
+    {% endif %}
+  </div>
+</div>

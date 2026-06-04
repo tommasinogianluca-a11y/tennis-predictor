@@ -82,12 +82,34 @@ def load_or_train_model():
         db.close()
 
 
+def _cancel_stale_jobs():
+    """Mark any 'running' jobs as 'interrupted' — they died with the previous process."""
+    from data.db import SessionLocal, SystemJob
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        stale = db.query(SystemJob).filter_by(status="running").all()
+        if stale:
+            for j in stale:
+                j.status = "failed"
+                j.log = (j.log or "") + "\n[WARN] Processo interrotto dal riavvio del server."
+                j.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            _log(f"Marked {len(stale)} stale job(s) as failed.")
+    except Exception as e:
+        _log(f"Could not clean stale jobs: {e}")
+    finally:
+        db.close()
+
+
 def _background_init():
     global _init_done, _init_error, _init_step
     try:
         _init_step = "migrations"
         _log("Step 1/5: running migrations...")
         run_migrations()
+
+        _cancel_stale_jobs()
 
         _init_step = "create_tables"
         _log("Step 2/5: creating tables...")
