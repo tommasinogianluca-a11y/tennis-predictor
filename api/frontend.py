@@ -216,6 +216,119 @@ def overview(
     return templates.TemplateResponse(request, "overview.html", ctx)
 
 
+# ── History ──────────────────────────────────────────────────────────────────
+
+@router.get("/history", response_class=HTMLResponse)
+def history_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    from data.db import Match
+
+    now = datetime.now(timezone.utc)
+
+    # Past value bets: match_date already passed
+    past_preds = (
+        db.query(Prediction)
+        .filter(
+            Prediction.value_bet_player.isnot(None),
+            Prediction.match_date.isnot(None),
+            Prediction.match_date < now,
+            Prediction.bookmaker_odds_p1.isnot(None),  # API-sourced only
+        )
+        .order_by(Prediction.match_date.desc())
+        .limit(200)
+        .all()
+    )
+
+    # Resolve player names
+    all_pids = set()
+    for p in past_preds:
+        all_pids.add(p.player1_id)
+        all_pids.add(p.player2_id)
+    player_names = {
+        p.id: p.name
+        for p in db.query(Player).filter(Player.id.in_(all_pids)).all()
+    } if all_pids else {}
+
+    bets = []
+    wins = losses = 0
+    total_pnl = 0.0
+
+    for pred in past_preds:
+        is_p1 = (pred.value_bet_player == 1)
+        bet_pid = pred.player1_id if is_p1 else pred.player2_id
+        bet_odds = pred.bookmaker_odds_p1 if is_p1 else pred.bookmaker_odds_p2
+        bet_prob = pred.p1_win_probability if is_p1 else pred.p2_win_probability
+
+        # Find actual match result ± 3 days
+        match_d = pred.match_date.date() if pred.match_date else None
+        actual_winner_id = None
+        if match_d:
+            from datetime import timedelta
+            actual = (
+                db.query(Match)
+                .filter(
+                    ((Match.player1_id == pred.player1_id) & (Match.player2_id == pred.player2_id)) |
+                    ((Match.player1_id == pred.player2_id) & (Match.player2_id == pred.player1_id)),
+                    Match.date >= match_d - timedelta(days=3),
+                    Match.date <= match_d + timedelta(days=3),
+                    Match.winner_id.isnot(None),
+                )
+                .order_by(Match.date.desc())
+                .first()
+            )
+            if actual:
+                actual_winner_id = actual.winner_id
+
+        # Determine outcome
+        outcome = None
+        pnl = None
+        if actual_winner_id is not None:
+            if actual_winner_id == bet_pid:
+                outcome = "win"
+                pnl = round((bet_odds or 1) - 1, 3)
+                wins += 1
+            else:
+                outcome = "loss"
+                pnl = -1.0
+                losses += 1
+            total_pnl += pnl
+
+        bets.append({
+            "player1": player_names.get(pred.player1_id, f"#{pred.player1_id}"),
+            "player2": player_names.get(pred.player2_id, f"#{pred.player2_id}"),
+            "bet_player_name": player_names.get(bet_pid, f"#{bet_pid}"),
+            "surface": pred.surface,
+            "category": pred.tournament_category,
+            "match_date": pred.match_date,
+            "bet_odds": bet_odds,
+            "bet_prob": bet_prob or 0.5,
+            "edge_pct": pred.edge_percentage or 0,
+            "outcome": outcome,
+            "pnl": pnl,
+        })
+
+    resolved = wins + losses
+    summary = {
+        "total": len(bets),
+        "resolved": resolved,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": (wins / resolved * 100) if resolved > 0 else 0,
+        "roi": (total_pnl / resolved * 100) if resolved > 0 else 0,
+    }
+
+    return templates.TemplateResponse(request, "history.html", {
+        "active": "history",
+        "bets": bets,
+        "summary": summary,
+        **_sidebar_context(db),
+    })
+
+
 # ── Value Bets ───────────────────────────────────────────────────────────────
 
 @router.get("/value-bets", response_class=HTMLResponse)

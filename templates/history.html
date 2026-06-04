@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Storico Bet — Scommettitore{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl">
+
+  <div class="flex items-center gap-3 mb-4">
+    <h1 class="text-white font-bold text-lg">📒 Storico Scommesse</h1>
+    <span class="text-gray-500 text-xs">value bets passate con esito reale</span>
+  </div>
+
+  {% if summary.total > 0 %}
+  <!-- P&L Summary bar -->
+  <div class="grid grid-cols-4 gap-2 mb-5">
+    <div class="bg-[#1a1a2e] rounded-lg p-3 border border-[#2a2a3e] text-center">
+      <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Bet totali</div>
+      <div class="text-white font-bold text-lg">{{ summary.total }}</div>
+    </div>
+    <div class="bg-[#1a1a2e] rounded-lg p-3 border border-[#2a2a3e] text-center">
+      <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Vinte</div>
+      <div class="text-emerald-400 font-bold text-lg">{{ summary.wins }}</div>
+    </div>
+    <div class="bg-[#1a1a2e] rounded-lg p-3 border border-[#2a2a3e] text-center">
+      <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Win rate</div>
+      <div class="font-bold text-lg
+        {% if summary.win_rate >= 55 %}text-emerald-400
+        {% elif summary.win_rate >= 45 %}text-amber-400
+        {% else %}text-red-400{% endif %}">
+        {{ "%.0f"|format(summary.win_rate) }}%
+      </div>
+    </div>
+    <div class="bg-[#1a1a2e] rounded-lg p-3 border border-[#2a2a3e] text-center">
+      <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">ROI (1u stake)</div>
+      <div class="font-bold text-lg
+        {% if summary.roi >= 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ "%+.1f"|format(summary.roi) }}%
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if bets %}
+  <div class="flex flex-col gap-2">
+    {% for b in bets %}
+    <div class="bg-[#1a1a2e] rounded-lg border border-[#2a2a3e] overflow-hidden">
+
+      <!-- Header -->
+      <div class="bg-[#2d2d4e] px-4 py-2 flex items-center justify-between">
+        <div>
+          <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Scommessa su</div>
+          <div class="text-white font-bold text-sm">{{ b.bet_player_name }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          {% if b.outcome == 'win' %}
+          <span class="bg-emerald-900/60 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full">✓ WIN</span>
+          {% elif b.outcome == 'loss' %}
+          <span class="bg-red-900/60 text-red-400 text-xs font-bold px-2.5 py-1 rounded-full">✗ LOSS</span>
+          {% else %}
+          <span class="bg-gray-800 text-gray-500 text-xs px-2.5 py-1 rounded-full">? sconosciuto</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="px-4 py-3">
+        <div class="text-gray-400 text-xs mb-2 flex items-center gap-2 flex-wrap">
+          <span class="text-gray-300">{{ b.player1 }} vs {{ b.player2 }}</span>
+          <span class="text-gray-600">·</span>
+          <span class="{% if b.surface == 'clay' %}text-amber-400
+                        {% elif b.surface == 'grass' %}text-emerald-400
+                        {% elif b.surface == 'hard' %}text-blue-400
+                        {% else %}text-gray-400{% endif %}">
+            {{ b.surface }}{% if b.category %} · {{ b.category }}{% endif %}
+          </span>
+          <span class="ml-auto text-gray-600 text-[10px]">
+            {% if b.match_date %}{{ b.match_date.strftime("%d %b %Y") }}{% endif %}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-4 gap-2 text-center">
+          <div class="bg-[#0f0f1a] rounded p-2">
+            <div class="text-[10px] text-gray-500 mb-1">Quota</div>
+            <div class="text-white font-bold text-sm">{{ "%.2f"|format(b.bet_odds) if b.bet_odds else "—" }}</div>
+          </div>
+          <div class="bg-[#0f0f1a] rounded p-2">
+            <div class="text-[10px] text-gray-500 mb-1">Prob. modello</div>
+            <div class="text-purple-400 font-bold text-sm">{{ "%.0f"|format(b.bet_prob * 100) }}%</div>
+          </div>
+          <div class="bg-[#0f0f1a] rounded p-2">
+            <div class="text-[10px] text-gray-500 mb-1">Edge</div>
+            <div class="font-bold text-sm
+              {% if b.edge_pct >= 10 %}text-emerald-400
+              {% elif b.edge_pct >= 5 %}text-amber-400
+              {% else %}text-gray-400{% endif %}">
+              +{{ "%.1f"|format(b.edge_pct) }}%
+            </div>
+          </div>
+          <div class="bg-[#0f0f1a] rounded p-2">
+            <div class="text-[10px] text-gray-500 mb-1">P&L (1u)</div>
+            <div class="font-bold text-sm
+              {% if b.pnl > 0 %}text-emerald-400
+              {% elif b.pnl < 0 %}text-red-400
+              {% else %}text-gray-400{% endif %}">
+              {% if b.pnl is not none %}{{ "%+.2f"|format(b.pnl) }}u{% else %}—{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="bg-[#1a1a2e] rounded-lg p-8 text-center">
+    <div class="text-2xl mb-3">📭</div>
+    <div class="text-gray-400 text-sm font-medium">Nessuna scommessa passata.</div>
+    <div class="text-gray-600 text-xs mt-1">
+      Appariranno qui le value bet il cui match_date è già trascorso.
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
