@@ -84,12 +84,17 @@ def _build_memory_cache(db: Session) -> dict:
         .all()
     )
 
+    # player_matches and player_dates are kept in date-ascending order
+    # (all_matches is already ORDER BY date ASC from the query above)
     player_matches: dict = defaultdict(list)
+    player_dates: dict = defaultdict(list)   # parallel list of dates for bisect
     for m in all_matches:
         if m.player1_id:
             player_matches[m.player1_id].append(m)
+            player_dates[m.player1_id].append(m.date)
         if m.player2_id:
             player_matches[m.player2_id].append(m)
+            player_dates[m.player2_id].append(m.date)
 
     logger.info("Loading ELO ratings into memory...")
     elo_map: dict = {}
@@ -111,6 +116,7 @@ def _build_memory_cache(db: Session) -> dict:
     return {
         "all_matches": all_matches,
         "player_matches": dict(player_matches),
+        "player_dates": dict(player_dates),
         "elo_map": elo_map,
         "stats_map": dict(stats_map),
         "sentiment_map": sentiment_map,
@@ -124,6 +130,7 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
                          tournament_category: str, as_of: date,
                          tournament_name: str, cache: dict) -> list:
     """18-feature vector using in-memory cache. H2H uses recency decay."""
+    import bisect
     from datetime import timedelta
     from models.features import recent_form, tournament_prestige
 
@@ -135,6 +142,7 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
 
     elo_map = cache["elo_map"]
     player_matches = cache["player_matches"]
+    player_dates = cache["player_dates"]   # pid → sorted list of dates (parallel to player_matches)
     stats_map = cache["stats_map"]
     sentiment_map = cache["sentiment_map"]
     player_map = cache["player_map"]
@@ -143,8 +151,14 @@ def _build_feature_fast(p1_id: int, p2_id: int, surface: str,
         return elo_map.get((pid, surface), 1500.0)
 
     def get_player_matches_before(pid: int):
-        return [m for m in player_matches.get(pid, [])
-                if m.date is not None and m.date < as_of]
+        """O(log n) binary search on sorted date list, then slice."""
+        ms = player_matches.get(pid, [])
+        dates = player_dates.get(pid, [])
+        if not ms:
+            return []
+        # bisect_left finds insertion point for as_of → all indices < that are before as_of
+        idx = bisect.bisect_left(dates, as_of)
+        return ms[:idx]
 
     def get_surface_winrate(pid: int) -> float:
         ms = [m for m in get_player_matches_before(pid)
