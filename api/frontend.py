@@ -536,12 +536,14 @@ def _run_action(job_id: str, action: str) -> None:
             from data.db import SessionLocal
             from data.scraper import run_scraper
             from models.elo import backfill_elo
+            from models.predictor import invalidate_data_cache
             log("[INFO] Starting scraper...")
             db = SessionLocal()
             try:
                 run_scraper(db)
                 log("[INFO] Scraper done. Running ELO update...")
                 backfill_elo(db)
+                invalidate_data_cache()   # new matches → rebuild feature cache
                 log("[OK] ELO updated. ✅")
             finally:
                 db.close()
@@ -549,7 +551,7 @@ def _run_action(job_id: str, action: str) -> None:
         elif action == "retrain":
             import models.predictor as pred_module
             from data.db import SessionLocal
-            from models.predictor import train_all_models
+            from models.predictor import invalidate_data_cache, train_all_models
             log("[INFO] Retrain avviato (tutti i modelli superficie + globale)...")
             db = SessionLocal()
             try:
@@ -557,6 +559,7 @@ def _run_action(job_id: str, action: str) -> None:
                 with pred_module._model_lock:
                     pred_module._cached_models.clear()
                     pred_module._cached_models.update(trained)
+                invalidate_data_cache()   # force fresh cache on next predict
                 log(f"[OK] Retrain completato: {list(trained.keys())}. ✅")
             finally:
                 db.close()
@@ -675,6 +678,10 @@ def debug_odds(
     _: None = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
+    import os
+    if os.getenv("RAILWAY_ENVIRONMENT") == "production":
+        from fastapi.responses import Response
+        return Response(status_code=404)
     """Synchronous odds pipeline diagnostic — returns plaintext report."""
     import traceback as _tb
     lines = ["<pre style='font-family:monospace;font-size:12px;color:#ccc'>"]

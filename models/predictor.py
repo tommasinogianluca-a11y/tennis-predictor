@@ -472,10 +472,43 @@ def train_all_models(db: Session, log_cb=None) -> dict:
     return trained
 
 
-# ── Model cache + loading ─────────────────────────────────────────────────────
+# ── Model + data cache ───────────────────────────────────────────────────────
 
 _cached_models: dict = {}   # surface/key → model object
 _model_lock = threading.Lock()
+
+_cached_data: dict = {}     # single shared data cache for live predictions
+_data_cache_lock = threading.Lock()
+_DATA_CACHE_TTL = 3600      # seconds — rebuild if older than 1 hour
+
+
+def get_data_cache(db: Session) -> dict:
+    """
+    Return in-memory data cache for feature building.
+    Lazily built on first call, refreshed after TTL expires.
+    Thread-safe. Same cache structure as _build_memory_cache().
+    """
+    import time
+    now = time.time()
+    if _cached_data.get("__ts__", 0) + _DATA_CACHE_TTL > now:
+        return _cached_data
+    with _data_cache_lock:
+        # Double-check after acquiring lock
+        if _cached_data.get("__ts__", 0) + _DATA_CACHE_TTL > now:
+            return _cached_data
+        logger.info("Rebuilding data cache for live predictions...")
+        fresh = _build_memory_cache(db)
+        _cached_data.clear()
+        _cached_data.update(fresh)
+        _cached_data["__ts__"] = time.time()
+        logger.info("Data cache ready (%d matches).", len(_cached_data["all_matches"]))
+    return _cached_data
+
+
+def invalidate_data_cache() -> None:
+    """Call after scrape/retrain so next predict rebuilds the cache."""
+    with _data_cache_lock:
+        _cached_data.clear()
 
 
 def get_model(db: Session, surface: str = "global") -> object:
@@ -509,11 +542,17 @@ def predict(
     tournament_name: str = "",
     as_of: Optional[date] = None,
 ) -> dict:
+    """
+    Predict match outcome using surface-specific (or global) model.
+    Uses _build_feature_fast with persistent in-memory cache — same code
+    path as training, eliminating train/predict feature inconsistency.
+    """
     model = get_model(db, surface)
     as_of = as_of or date.today()
-    vec = build_feature_vector(
+    cache = get_data_cache(db)
+    vec = _build_feature_fast(
         player1_id, player2_id, surface, tournament_category,
-        as_of, db, tournament_name,
+        as_of, tournament_name, cache,
     )
     X = np.array([vec], dtype=np.float32)
     proba = model.predict_proba(X)[0]
