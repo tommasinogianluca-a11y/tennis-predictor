@@ -98,8 +98,8 @@
           <div class="bg-[#0f0f1a] rounded p-2">
             <div class="text-[10px] text-gray-500 mb-1">P&L (1u)</div>
             <div class="font-bold text-sm
-              {% if b.pnl > 0 %}text-emerald-400
-              {% elif b.pnl < 0 %}text-red-400
+              {% if b.pnl is not none and b.pnl > 0 %}text-emerald-400
+              {% elif b.pnl is not none and b.pnl < 0 %}text-red-400
               {% else %}text-gray-400{% endif %}">
               {% if b.pnl is not none %}{{ "%+.2f"|format(b.pnl) }}u{% else %}—{% endif %}
             </div>
